@@ -1,0 +1,323 @@
+package com.example.ui
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.ai.GeminiAIService
+import com.example.ai.LiveVoiceService
+import com.example.ai.LiveVoiceState
+import com.example.ai.MockAIService
+import com.example.ai.VoiceService
+import com.example.ai.context.ContextBuilder
+import com.example.ai.learning.LearningEngine
+import com.example.ai.live.GeminiLiveService
+import com.example.ai.memory.MemoryManager
+import com.example.ai.repository.AIRepository
+import com.example.ai.safety.MedicalSafetyGuard
+import com.example.ai.story.StoryEngine
+import com.example.ai.tools.ToolExecutor
+import com.example.data.local.AppDatabase
+import com.example.data.repository.DailyPlannerRepository
+import com.example.data.repository.FrenchWordRepository
+import com.example.data.repository.MemoryRepository
+import com.example.data.repository.ProfileRepository
+import com.example.data.repository.StoryRepository
+import com.example.domain.model.ConversationMessage
+import com.example.domain.model.DailyTask
+import com.example.domain.model.FrenchWordItem
+import com.example.domain.model.MemoryCategory
+import com.example.domain.model.MemoryItem
+import com.example.domain.model.MessageSender
+import com.example.domain.model.MotherProfile
+import com.example.domain.model.StoryChapter
+import com.example.domain.model.TaskCategory
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.UUID
+
+data class PendingActionConfirmation(
+    val title: String,
+    val description: String,
+    val onConfirmAction: () -> Unit
+)
+
+class RafiqahViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val db = AppDatabase.getInstance(application)
+    val profileRepo = ProfileRepository(db.profileDao())
+    val memoryRepo = MemoryRepository(db.memoryDao())
+    val storyRepo = StoryRepository(db.storyDao())
+    val plannerRepo = DailyPlannerRepository(db.dailyTaskDao())
+    val frenchRepo = FrenchWordRepository(db.frenchWordDao())
+
+    val voiceService = VoiceService(application)
+    val geminiLiveService = GeminiLiveService(application, voiceService)
+    val liveVoiceService = LiveVoiceService(application, voiceService, geminiLiveService)
+
+    val toolExecutor = ToolExecutor(
+        profileRepo = profileRepo,
+        memoryRepo = memoryRepo,
+        storyRepo = storyRepo,
+        plannerRepo = plannerRepo,
+        frenchRepo = frenchRepo
+    )
+
+    val learningEngine = LearningEngine()
+    val storyEngine = StoryEngine()
+    val medicalSafetyGuard = MedicalSafetyGuard()
+    val memoryManager = MemoryManager()
+    val contextBuilder = ContextBuilder()
+
+    val aiRepository = AIRepository(
+        aiService = GeminiAIService(fallbackService = MockAIService()),
+        toolExecutor = toolExecutor,
+        memoryRepo = memoryRepo,
+        contextBuilder = contextBuilder,
+        memoryManager = memoryManager,
+        medicalSafetyGuard = medicalSafetyGuard,
+        learningEngine = learningEngine,
+        storyEngine = storyEngine
+    )
+
+    // Data Flows from Room
+    val profile: StateFlow<MotherProfile> = profileRepo.profileFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MotherProfile())
+
+    val memories: StateFlow<List<MemoryItem>> = memoryRepo.allMemories
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val chapters: StateFlow<List<StoryChapter>> = storyRepo.allChapters
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val tasks: StateFlow<List<DailyTask>> = plannerRepo.allTasks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val frenchWords: StateFlow<List<FrenchWordItem>> = frenchRepo.allWords
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Voice and Live Conversation states
+    val isSpeaking: StateFlow<Boolean> = voiceService.isSpeaking
+    val liveVoiceState: StateFlow<LiveVoiceState> = liveVoiceService.connectionState
+    val liveTranscript: StateFlow<String> = liveVoiceService.liveTranscript
+    val isLiveSessionActive: StateFlow<Boolean> = liveVoiceService.isSessionActive
+
+    // Pending natural confirmation for sensitive actions
+    private val _pendingConfirmation = MutableStateFlow<PendingActionConfirmation?>(null)
+    val pendingConfirmation: StateFlow<PendingActionConfirmation?> = _pendingConfirmation.asStateFlow()
+
+    private val _messages = MutableStateFlow<List<ConversationMessage>>(
+        listOf(
+            ConversationMessage(
+                id = "welcome_v2",
+                sender = MessageSender.RAFIQAH,
+                text = "على سلامتك يا أمي الحبيبة 🌷 نهارك مبروك وهادي. أنا رفيقتك ومعاك خطوة بخطوة، تحبي نحكيو على صحتك، ولا نكملو قصة سارة في الطب، ولا نشوفو كلمة جديدة بالفرنسية؟",
+                spokenDialectText = "على سلامتك يا أمي الغالية، ربي ينور نهارك. أنا رفيقتك وهنا ديما باش نونسك ونفرحك."
+            )
+        )
+    )
+    val messages: StateFlow<List<ConversationMessage>> = _messages.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            AppDatabase.seedInitialData(db)
+        }
+    }
+
+    fun getDynamicHomeGreeting(): String {
+        val currentProfile = profile.value
+        val name = currentProfile.identity.name
+        val cal = Calendar.getInstance()
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val timeGreeting = if (hour < 12) "صباح الخير والياسمين" else if (hour < 18) "نهارك مبروك ومزين" else "مساء النور والراحة"
+
+        val lastChapter = currentProfile.learning.lastChapterNumber
+        return "$timeGreeting يا $name 🌷\nأنت توقفت عند الفصل $lastChapter في رحلة سارة، ونطمنوا على صحتك ونومك اليوم."
+    }
+
+    fun sendVoiceMessage(userText: String) {
+        val userMsg = ConversationMessage(
+            id = UUID.randomUUID().toString(),
+            sender = MessageSender.USER,
+            text = userText
+        )
+        _messages.value = _messages.value + userMsg
+
+        viewModelScope.launch {
+            val currentProfile = profile.value
+            val currentMemories = memories.value
+            val currentChapter = chapters.value.find { it.chapterNumber == currentProfile.learning.lastChapterNumber }
+            val currentTasks = tasks.value
+
+            val response = aiRepository.processUserSpeech(
+                userSpeech = userText,
+                profile = currentProfile,
+                recentMemories = currentMemories,
+                currentChapter = currentChapter,
+                todayTasks = currentTasks
+            )
+
+            val rafiqahMsg = ConversationMessage(
+                id = UUID.randomUUID().toString(),
+                sender = MessageSender.RAFIQAH,
+                text = response.replyText,
+                spokenDialectText = response.spokenDialectText
+            )
+            _messages.value = _messages.value + rafiqahMsg
+
+            // Speak the reply in warm dialect
+            voiceService.speak(response.spokenDialectText, "ar")
+
+            // Check if tool execution requires confirmation
+            val pending = response.pendingActionConfirmation
+            if (pending != null) {
+                _pendingConfirmation.value = PendingActionConfirmation(
+                    title = pending.confirmationTitle,
+                    description = pending.confirmationPrompt,
+                    onConfirmAction = {
+                        viewModelScope.launch {
+                            val result = aiRepository.executeConfirmedTool(pending.toolName, pending.arguments)
+                            speakText(result, "ar")
+                        }
+                        _pendingConfirmation.value = null
+                    }
+                )
+            }
+        }
+    }
+
+    fun confirmPendingAction() {
+        _pendingConfirmation.value?.onConfirmAction?.invoke()
+    }
+
+    fun dismissPendingAction() {
+        _pendingConfirmation.value = null
+    }
+
+    // Live Voice Engine controls
+    fun startLiveVoiceSession() {
+        liveVoiceService.startLiveSession { _, _ -> }
+    }
+
+    fun onLiveVoiceInput(speech: String) {
+        liveVoiceService.onUserSpeechInput(speech) { userSpeech, reply, spoken ->
+            val userMsg = ConversationMessage(
+                id = UUID.randomUUID().toString(),
+                sender = MessageSender.USER,
+                text = userSpeech
+            )
+            val rafiqahMsg = ConversationMessage(
+                id = UUID.randomUUID().toString(),
+                sender = MessageSender.RAFIQAH,
+                text = reply,
+                spokenDialectText = spoken
+            )
+            _messages.value = _messages.value + userMsg + rafiqahMsg
+        }
+    }
+
+    fun interruptLiveVoice() {
+        liveVoiceService.interrupt()
+    }
+
+    fun stopLiveVoiceSession() {
+        liveVoiceService.endSession()
+    }
+
+    fun reconnectLiveVoice() {
+        liveVoiceService.reconnect()
+    }
+
+    fun speakText(text: String, languageTag: String = "ar") {
+        voiceService.speak(text, languageTag)
+    }
+
+    fun stopSpeaking() {
+        voiceService.stop()
+    }
+
+    fun completeChapter(chapterNumber: Int) {
+        viewModelScope.launch {
+            storyRepo.completeChapter(chapterNumber)
+
+            val currentChapters = storyRepo.getAllChaptersList()
+            val storyProgress = storyEngine.calculateStoryProgress(currentChapters, chapterNumber)
+
+            profileRepo.updateLearningProgress(
+                lastChapterNumber = chapterNumber,
+                progressPercent = storyProgress.percentCompleted,
+                lastLessonTitle = "الفصل $chapterNumber في رحلة سارة"
+            )
+            memoryRepo.saveMemoryWithDeduplication(
+                content = "أكملت أمي الفصل $chapterNumber من رواية سارة بنجاح واهتمام.",
+                category = MemoryCategory.STORY,
+                importance = 4,
+                source = "رواية سارة"
+            )
+        }
+    }
+
+    fun toggleTask(id: Long, completed: Boolean) {
+        viewModelScope.launch {
+            plannerRepo.setTaskCompleted(id, completed)
+        }
+    }
+
+    fun addTask(title: String, timeHint: String) {
+        viewModelScope.launch {
+            plannerRepo.addTask(
+                title = title,
+                category = TaskCategory.HEALTH_HABIT,
+                timeHint = timeHint,
+                isPriority = false
+            )
+        }
+    }
+
+    fun toggleFrenchMastered(id: Int, mastered: Boolean) {
+        viewModelScope.launch {
+            frenchRepo.setWordMastered(id, mastered)
+            if (mastered) {
+                memoryRepo.saveMemoryWithDeduplication(
+                    content = "حفظت أمي كلمة بالفرنسية وطبقتها في سياقها التونسي.",
+                    category = MemoryCategory.FRENCH,
+                    importance = 3,
+                    source = "تعلم الفرنسية"
+                )
+            }
+        }
+    }
+
+    fun deleteMemory(id: Long) {
+        viewModelScope.launch {
+            memoryRepo.deleteMemory(id)
+        }
+    }
+
+    fun saveLearningProgress(concept: String, isCorrect: Boolean) {
+        viewModelScope.launch {
+            if (isCorrect) {
+                learningEngine.onUserUnderstood(concept)
+            } else {
+                learningEngine.onUserConfused(concept)
+            }
+            val statusText = if (isCorrect) "أجابت أمي إجابة صحيحة وفهمت" else "راجعت أمي مفهوم"
+            memoryRepo.saveMemoryWithDeduplication(
+                content = "$statusText $concept.",
+                category = MemoryCategory.LEARNING,
+                importance = 4,
+                source = "اختبار الفهم السريع"
+            )
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        liveVoiceService.endSession()
+        voiceService.shutdown()
+    }
+}

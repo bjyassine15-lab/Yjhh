@@ -1,0 +1,6 @@
+{
+  "name": "رفيقة",
+  "description": "رفيق شخصي ذكي ودافئ لوالدتي لتعليم الطب والعلوم بالقصص والمحادثة بالتونسي المبسط ومتابعة صحتها ويومها",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
