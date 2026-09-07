@@ -28,26 +28,33 @@ data class ProcessSpeechResult(
     val replyText: String,
     val spokenDialectText: String,
     val pendingActionConfirmation: PendingConfirmationData? = null,
+    val pendingMemoryCandidate: MemoryManager.MemoryCandidate? = null,
     val isUrgentMedicalNotice: Boolean = false
 )
 
 /**
- * AIRepository for Rafiqah V2.1.
+ * AIRepository for Rafiqah V2.5.
  * Central coordinator for:
  * User Utterance -> Medical Safety Check -> Context Building -> Gemini AI ->
  * Tool Calling Lifecycle -> Tool Execution (Room) -> Second Turn ->
- * Medical Output Sanitization -> Deduplicated Memory Extraction -> Room Persistence.
+ * Medical Output Sanitization -> Deduplicated Memory Extraction -> Approval Verification -> Room Persistence.
  */
 class AIRepository(
     private val aiService: AIService,
-    private val toolExecutor: ToolExecutor,
-    private val memoryRepo: MemoryRepository,
+    val toolExecutor: ToolExecutor,
+    val memoryRepo: MemoryRepository,
     val contextBuilder: ContextBuilder = ContextBuilder(),
     val memoryManager: MemoryManager = MemoryManager(),
     val medicalSafetyGuard: MedicalSafetyGuard = MedicalSafetyGuard(),
     val learningEngine: LearningEngine = LearningEngine(),
     val storyEngine: StoryEngine = StoryEngine()
 ) {
+
+    init {
+        if (aiService is GeminiAIService) {
+            aiService.toolExecutor = toolExecutor
+        }
+    }
 
     suspend fun processUserSpeech(
         userSpeech: String,
@@ -120,7 +127,7 @@ class AIRepository(
             learningEngine.onUserUnderstood(conceptKey)
         }
 
-        // Step 8: Memory Extraction with Deduplication
+        // Step 8: Memory Extraction with Deduplication and Sensitivity Approval Verification
         val candidates = memoryManager.extractMemories(
             userUtterance = userSpeech,
             aiReply = sanitizedReply,
@@ -128,25 +135,49 @@ class AIRepository(
             existingMemories = recentMemories
         )
 
+        var pendingMemory: MemoryManager.MemoryCandidate? = null
         for (candidate in candidates) {
-            memoryRepo.saveMemoryWithDeduplication(
-                content = candidate.content,
-                category = candidate.category,
-                importance = candidate.importance,
-                source = candidate.source
-            )
+            if (candidate.requiresApproval) {
+                // Sensitive memories (e.g. Health conditions/prescriptions) require user approval
+                pendingMemory = candidate
+            } else {
+                memoryRepo.saveMemoryWithDeduplication(
+                    content = candidate.content,
+                    category = candidate.category,
+                    importance = candidate.importance,
+                    source = candidate.source
+                )
+            }
         }
 
         return ProcessSpeechResult(
             replyText = sanitizedReply,
             spokenDialectText = sanitizedSpoken,
             pendingActionConfirmation = pendingConfirmation,
+            pendingMemoryCandidate = pendingMemory,
             isUrgentMedicalNotice = safetyEval.riskLevel == MedicalSafetyGuard.HealthRiskLevel.URGENT
         )
     }
 
+    suspend fun approveAndSaveMemory(candidate: MemoryManager.MemoryCandidate): Long {
+        return memoryRepo.saveMemoryWithDeduplication(
+            content = candidate.content,
+            category = candidate.category,
+            importance = candidate.importance,
+            source = candidate.source
+        )
+    }
+
+    suspend fun deleteMemory(id: Long) {
+        memoryRepo.deleteMemory(id)
+    }
+
     suspend fun executeConfirmedTool(toolName: String, args: Map<String, Any?>): String {
         return toolExecutor.executeTool(toolName, args)
+    }
+
+    suspend fun handleRejectedConfirmation(toolName: String): String {
+        return "باهي يا أمي، كيما تحب، ما سجلت حتى شيء وكل شيء تحت أمرك 🌷"
     }
 
     suspend fun getProgressiveExplanation(conceptKey: String, level: Int): String {

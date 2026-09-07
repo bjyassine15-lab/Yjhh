@@ -5,7 +5,14 @@ import android.util.Base64
 import android.util.Log
 import com.example.ai.AIConfig
 import com.example.ai.VoiceService
+import com.example.ai.auth.DevelopmentGeminiAuthProvider
+import com.example.ai.auth.GeminiAuthProvider
+import com.example.ai.live.audio.AudioInput
+import com.example.ai.live.audio.AudioOutput
+import com.example.ai.live.audio.HardwarePcmAudioInput
+import com.example.ai.live.audio.HardwarePcmAudioOutput
 import com.example.ai.tools.AIToolRegistry
+import com.example.ai.tools.ToolExecutor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,7 +35,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Connection states for Gemini Live Voice in Rafiqah V2.1.
+ * Connection states for Gemini Live Voice in Rafiqah V2.5.
  */
 enum class LiveSessionState(val arabicLabel: String) {
     IDLE("جاهزة للمحادثة 🌷"),
@@ -49,22 +56,26 @@ data class LiveToolCallEvent(
 )
 
 /**
- * Production Gemini Live Service for Rafiqah V2.1.
+ * Production Gemini Live Service for Rafiqah V2.5.
  * Connects to Gemini Live Bidi Streaming API (gemini-3.1-flash-live-preview)
  * using WebSockets over OkHttp.
  *
- * Real Audio Streaming & Lifecycle:
- * - WebSocket connection lifecycle: connect, authenticate, setup, stream, close, reconnect.
- * - Supports real-time audio chunk dispatch (16kHz PCM Base64 encoded).
- * - Handles server audio playback buffer, text transcriptions, and instant interruption.
- * - Handles Live Function Calling dispatch and tool responses.
- * - Gracefully falls back to local voice simulation when API key is missing or network fails.
+ * Real Bidirectional Audio Architecture:
+ * 1. Microphone -> AudioInput (AudioRecord 16kHz PCM Mono) -> realtimeInput mediaChunks.
+ * 2. Server Audio (24kHz PCM) -> AudioOutput (AudioTrack) -> Speaker.
+ * 3. Instant Interruption / Barge-in: instant audio track flush + state switch to LISTENING.
+ * 4. Two-way Live Tool Calling: functionCall -> ToolExecutor -> toolResponse WebSocket event.
+ * 5. Bounded reconnection with exponential backoff (max 3 retries).
  */
 class GeminiLiveService(
     private val context: Context,
-    private val fallbackVoiceService: VoiceService
+    private val fallbackVoiceService: VoiceService,
+    private val authProvider: GeminiAuthProvider = DevelopmentGeminiAuthProvider(),
+    var audioInput: AudioInput = HardwarePcmAudioInput(context),
+    var audioOutput: AudioOutput = HardwarePcmAudioOutput(24000),
+    var toolExecutor: ToolExecutor? = null
 ) {
-    private val tag = "GeminiLiveService"
+    private val tag = "RafiqahLive"
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
     private val _sessionState = MutableStateFlow(LiveSessionState.IDLE)
@@ -85,69 +96,90 @@ class GeminiLiveService(
 
     private var isUsingFallback = false
     private var mockJob: Job? = null
-
-    private fun resolveApiKey(): String {
-        return try {
-            val clazz = Class.forName("com.example.BuildConfig")
-            val field = clazz.getField("GEMINI_API_KEY")
-            val key = field.get(null) as? String ?: ""
-            if (key == "MY_GEMINI_API_KEY" || key.isBlank()) "" else key
-        } catch (_: Exception) {
-            ""
-        }
-    }
+    private var reconnectAttempts = 0
+    private val maxReconnectAttempts = 3
 
     /**
      * Initiates the Live Voice session.
      */
     fun startLiveSession(onGreetingSpoken: () -> Unit = {}) {
-        val apiKey = resolveApiKey()
-        if (apiKey.isBlank()) {
-            Log.i(tag, "No API key found. Launching local live voice simulation.")
-            startLocalSimulation(onGreetingSpoken)
-            return
+        scope.launch {
+            val apiKey = authProvider.getApiKeyOrToken()
+            if (apiKey.isNullOrBlank()) {
+                Log.i(tag, "No Gemini API key resolved. Launching local live voice simulation.")
+                startLocalSimulation(onGreetingSpoken)
+                return@launch
+            }
+
+            _sessionState.value = LiveSessionState.CONNECTING
+            isUsingFallback = false
+
+            val wsUrl = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey"
+            val request = Request.Builder().url(wsUrl).build()
+
+            webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(ws: WebSocket, response: Response) {
+                    Log.i(tag, "Gemini Live WebSocket opened successfully.")
+                    reconnectAttempts = 0
+                    scope.launch {
+                        _sessionState.value = LiveSessionState.LISTENING
+                        sendSetupMessage(ws)
+                        startMicrophoneCapture()
+                        onGreetingSpoken()
+                    }
+                }
+
+                override fun onMessage(ws: WebSocket, text: String) {
+                    handleServerMessage(text)
+                }
+
+                override fun onMessage(ws: WebSocket, bytes: ByteString) {
+                    // Server binary PCM audio frame
+                    scope.launch {
+                        _sessionState.value = LiveSessionState.SPEAKING
+                        audioOutput.playPcmChunk(bytes.toByteArray())
+                    }
+                }
+
+                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    Log.w(tag, "Live WebSocket error: ${t.javaClass.simpleName} - ${t.message}")
+                    scope.launch {
+                        handleConnectionFailure(onGreetingSpoken)
+                    }
+                }
+
+                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                    Log.i(tag, "Live WebSocket closed ($code: $reason)")
+                    scope.launch {
+                        stopMicrophoneCapture()
+                        audioOutput.stopAndFlush()
+                        if (_sessionState.value != LiveSessionState.ERROR) {
+                            _sessionState.value = LiveSessionState.IDLE
+                        }
+                    }
+                }
+            })
         }
+    }
 
-        _sessionState.value = LiveSessionState.CONNECTING
-        isUsingFallback = false
+    private fun handleConnectionFailure(onGreetingSpoken: () -> Unit) {
+        stopMicrophoneCapture()
+        audioOutput.stopAndFlush()
 
-        val wsUrl = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey"
-        val request = Request.Builder().url(wsUrl).build()
-
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) {
-                Log.d(tag, "WebSocket opened with Gemini Live API")
-                scope.launch {
-                    _sessionState.value = LiveSessionState.LISTENING
-                    sendSetupMessage(ws)
-                    onGreetingSpoken()
-                }
+        if (reconnectAttempts < maxReconnectAttempts) {
+            reconnectAttempts++
+            _sessionState.value = LiveSessionState.RECONNECTING
+            val backoffMs = (1000L * (1 shl (reconnectAttempts - 1)))
+            Log.i(tag, "Attempting reconnect $reconnectAttempts/$maxReconnectAttempts after ${backoffMs}ms")
+            scope.launch {
+                delay(backoffMs)
+                startLiveSession(onGreetingSpoken)
             }
-
-            override fun onMessage(ws: WebSocket, text: String) {
-                handleServerMessage(text)
-            }
-
-            override fun onMessage(ws: WebSocket, bytes: ByteString) {
-                // Audio payload from server
-                scope.launch {
-                    _sessionState.value = LiveSessionState.SPEAKING
-                }
-            }
-
-            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                Log.w(tag, "Live WebSocket error: ${t.message}. Falling back safely to local engine.")
-                scope.launch {
-                    startLocalSimulation(onGreetingSpoken)
-                }
-            }
-
-            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                scope.launch {
-                    _sessionState.value = LiveSessionState.IDLE
-                }
-            }
-        })
+        } else {
+            Log.w(tag, "Max reconnect attempts reached. Switching safely to local fallback mode.")
+            _sessionState.value = LiveSessionState.ERROR
+            startLocalSimulation(onGreetingSpoken)
+        }
     }
 
     private fun sendSetupMessage(ws: WebSocket) {
@@ -179,10 +211,35 @@ class GeminiLiveService(
     }
 
     /**
-     * Sends microphone PCM audio chunks to the Live API.
+     * Begins capturing microphone audio via [AudioInput] and streaming it to Gemini Live.
+     */
+    fun startMicrophoneCapture() {
+        val success = audioInput.startRecording { pcm16Chunk ->
+            // If the model was speaking and user speaks, trigger instant barge-in
+            if (_sessionState.value == LiveSessionState.SPEAKING) {
+                scope.launch {
+                    interruptPlayback()
+                }
+            }
+            sendAudioChunk(pcm16Chunk)
+        }
+        if (success) {
+            Log.i(tag, "Microphone capture active and streaming to Gemini Live.")
+        }
+    }
+
+    /**
+     * Stops capturing microphone audio.
+     */
+    fun stopMicrophoneCapture() {
+        audioInput.stopRecording()
+    }
+
+    /**
+     * Sends microphone PCM audio chunk to the Live API over WebSocket.
      */
     fun sendAudioChunk(pcm16Data: ByteArray) {
-        if (isUsingFallback) return
+        if (isUsingFallback || webSocket == null) return
 
         val base64Data = Base64.encodeToString(pcm16Data, Base64.NO_WRAP)
         val realtimeMessage = JSONObject().apply {
@@ -207,7 +264,7 @@ class GeminiLiveService(
             return
         }
 
-        interrupt() // Stop any current assistant playback
+        interruptPlayback()
         _sessionState.value = LiveSessionState.THINKING
         _liveTranscript.value = "أمي: $userText"
 
@@ -238,8 +295,9 @@ class GeminiLiveService(
                 // Interruption notification from server
                 if (serverContent.optBoolean("interrupted", false)) {
                     scope.launch {
+                        audioOutput.stopAndFlush()
                         _sessionState.value = LiveSessionState.INTERRUPTED
-                        delay(200)
+                        delay(150)
                         _sessionState.value = LiveSessionState.LISTENING
                     }
                     return
@@ -250,6 +308,8 @@ class GeminiLiveService(
                 if (parts != null) {
                     for (i in 0 until parts.length()) {
                         val part = parts.optJSONObject(i) ?: continue
+
+                        // 1. Text transcript part
                         val textPart = part.optString("text")
                         if (textPart.isNotBlank()) {
                             scope.launch {
@@ -258,7 +318,24 @@ class GeminiLiveService(
                             }
                         }
 
-                        // Check tool call from Live session
+                        // 2. Audio PCM inlineData part
+                        val inlineData = part.optJSONObject("inlineData")
+                        if (inlineData != null) {
+                            val dataBase64 = inlineData.optString("data")
+                            if (dataBase64.isNotBlank()) {
+                                try {
+                                    val pcmBytes = Base64.decode(dataBase64, Base64.DEFAULT)
+                                    scope.launch {
+                                        _sessionState.value = LiveSessionState.SPEAKING
+                                        audioOutput.playPcmChunk(pcmBytes)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.w(tag, "Error decoding PCM audio chunk: ${e.message}")
+                                }
+                            }
+                        }
+
+                        // 3. Tool call part
                         val functionCall = part.optJSONObject("functionCall")
                         if (functionCall != null) {
                             val name = functionCall.optString("name")
@@ -270,8 +347,14 @@ class GeminiLiveService(
                                 val k = keys.next()
                                 argsMap[k] = argsObj.get(k)
                             }
+
                             scope.launch {
                                 _toolCallEvents.emit(LiveToolCallEvent(id, name, argsMap))
+                                // If tool executor is registered, execute immediately and return result
+                                toolExecutor?.let { executor ->
+                                    val result = executor.executeTool(name, argsMap)
+                                    sendToolResult(id, name, result)
+                                }
                             }
                         }
                     }
@@ -279,7 +362,7 @@ class GeminiLiveService(
 
                 if (serverContent.optBoolean("turnComplete", false)) {
                     scope.launch {
-                        delay(600)
+                        delay(400)
                         if (_sessionState.value == LiveSessionState.SPEAKING) {
                             _sessionState.value = LiveSessionState.LISTENING
                         }
@@ -292,10 +375,10 @@ class GeminiLiveService(
     }
 
     /**
-     * Sends tool execution result back to the Live Session.
+     * Sends tool execution result back to the Live Session over WebSocket.
      */
     fun sendToolResult(callId: String, functionName: String, resultString: String) {
-        if (isUsingFallback) return
+        if (isUsingFallback || webSocket == null) return
 
         val toolResponseMsg = JSONObject().apply {
             put("toolResponse", JSONObject().apply {
@@ -311,20 +394,21 @@ class GeminiLiveService(
             })
         }
         webSocket?.send(toolResponseMsg.toString())
+        Log.d(tag, "Tool result sent back to Gemini Live for function: $functionName")
     }
 
     /**
-     * Immediate interruption when user begins speaking or taps interrupt.
+     * Interruption / Barge-in: stops audio playback instantly, flushes buffers, and transitions to LISTENING.
      */
-    fun interrupt() {
+    fun interruptPlayback() {
+        audioOutput.stopAndFlush()
         fallbackVoiceService.stop()
         mockJob?.cancel()
 
         if (!isUsingFallback && webSocket != null) {
-            // Signal interruption to WebSocket
             _sessionState.value = LiveSessionState.INTERRUPTED
             scope.launch {
-                delay(200)
+                delay(150)
                 _sessionState.value = LiveSessionState.LISTENING
             }
         } else {
@@ -358,7 +442,7 @@ class GeminiLiveService(
     }
 
     private fun handleMockUserSpeech(userText: String) {
-        interrupt()
+        interruptPlayback()
         _sessionState.value = LiveSessionState.THINKING
         _liveTranscript.value = "أمي: $userText"
 
@@ -379,7 +463,12 @@ class GeminiLiveService(
      * Closes and cleans up the active session.
      */
     fun closeSession() {
-        interrupt()
+        stopMicrophoneCapture()
+        audioOutput.stopAndFlush()
+        audioOutput.release()
+        fallbackVoiceService.stop()
+        mockJob?.cancel()
+
         webSocket?.close(1000, "Session ended by user")
         webSocket = null
         _sessionState.value = LiveSessionState.IDLE

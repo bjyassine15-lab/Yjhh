@@ -5,11 +5,14 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.room.migration.Migration
 import com.example.data.local.dao.DailyTaskDao
 import com.example.data.local.dao.FrenchWordDao
+import com.example.data.local.dao.LearningProgressDao
 import com.example.data.local.dao.MemoryDao
 import com.example.data.local.dao.ProfileDao
 import com.example.data.local.dao.StoryDao
+import com.example.data.local.entity.ConceptProgressEntity
 import com.example.data.local.entity.DailyTaskEntity
 import com.example.data.local.entity.FrenchWordEntity
 import com.example.data.local.entity.MemoryEntity
@@ -25,9 +28,10 @@ import kotlinx.coroutines.launch
         MemoryEntity::class,
         StoryChapterEntity::class,
         DailyTaskEntity::class,
-        FrenchWordEntity::class
+        FrenchWordEntity::class,
+        ConceptProgressEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,10 +40,30 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun storyDao(): StoryDao
     abstract fun dailyTaskDao(): DailyTaskDao
     abstract fun frenchWordDao(): FrenchWordDao
+    abstract fun learningProgressDao(): LearningProgressDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `concept_progress` (
+                        `conceptKey` TEXT NOT NULL,
+                        `currentLevel` INTEGER NOT NULL,
+                        `mastery` TEXT NOT NULL,
+                        `needsReview` INTEGER NOT NULL,
+                        `attempts` INTEGER NOT NULL,
+                        `successfulAttempts` INTEGER NOT NULL,
+                        `lastReviewed` INTEGER NOT NULL,
+                        PRIMARY KEY(`conceptKey`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -48,6 +72,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "rafiqah_database"
                 )
+                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback())
                     .build()
                 INSTANCE = instance
@@ -266,6 +292,16 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             )
             database.frenchWordDao().insertWords(words)
+
+            if (database.learningProgressDao().getAllProgressList().isEmpty()) {
+                val initialConcepts = listOf(
+                    ConceptProgressEntity(conceptKey = "cell", currentLevel = 1, mastery = "NOT_STARTED"),
+                    ConceptProgressEntity(conceptKey = "membrane", currentLevel = 1, mastery = "NOT_STARTED"),
+                    ConceptProgressEntity(conceptKey = "nucleus", currentLevel = 1, mastery = "NOT_STARTED"),
+                    ConceptProgressEntity(conceptKey = "mitochondria", currentLevel = 1, mastery = "NOT_STARTED")
+                )
+                database.learningProgressDao().insertAll(initialConcepts)
+            }
         }
     }
 }

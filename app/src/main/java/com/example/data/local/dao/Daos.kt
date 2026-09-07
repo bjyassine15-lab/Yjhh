@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.example.data.local.entity.ConceptProgressEntity
 import com.example.data.local.entity.DailyTaskEntity
 import com.example.data.local.entity.FrenchWordEntity
 import com.example.data.local.entity.MemoryEntity
@@ -109,4 +110,22 @@ interface FrenchWordDao {
 
     @Query("UPDATE french_words SET isMastered = :isMastered WHERE id = :id")
     suspend fun setMastered(id: Int, isMastered: Boolean)
+}
+
+@Dao
+interface LearningProgressDao {
+    @Query("SELECT * FROM concept_progress")
+    fun getAllProgressFlow(): Flow<List<ConceptProgressEntity>>
+
+    @Query("SELECT * FROM concept_progress")
+    suspend fun getAllProgressList(): List<ConceptProgressEntity>
+
+    @Query("SELECT * FROM concept_progress WHERE conceptKey = :key LIMIT 1")
+    suspend fun getProgress(key: String): ConceptProgressEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(entity: ConceptProgressEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entities: List<ConceptProgressEntity>)
 }

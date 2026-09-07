@@ -1,7 +1,11 @@
 package com.example.ai
 
 import android.util.Log
+import com.example.ai.auth.AIConnectionMode
+import com.example.ai.auth.DevelopmentGeminiAuthProvider
+import com.example.ai.auth.GeminiAuthProvider
 import com.example.ai.tools.AIToolRegistry
+import com.example.ai.tools.ToolExecutor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -19,46 +23,47 @@ data class GeminiTurnResult(
     val replyText: String,
     val functionCallName: String? = null,
     val functionCallArgs: Map<String, Any?> = emptyMap(),
-    val isUrgentMedical: Boolean = false
+    val isUrgentMedical: Boolean = false,
+    val requiresConfirmation: Boolean = false
 )
 
 /**
- * Production Gemini AI Service for Rafiqah V2.1.
+ * Production Gemini AI Service for Rafiqah V2.5.
+ *
  * Supports:
- * 1. Text chat and system persona with gemini-3.5-flash.
+ * 1. Text chat and system persona using [AIConfig.GEMINI_DEFAULT_TEXT_MODEL].
  * 2. Official Gemini Function Calling via JSON schemas.
- * 3. Multi-turn tool execution (sending functionResponse back for final answer).
- * 4. Graceful offline fallback to [MockAIService] when offline or key is unset.
+ * 3. Complete Two-Turn Function Calling cycle:
+ *    Model functionCall -> Local Tool Execution -> functionResponse with original args -> Model Final Reply.
+ * 4. Tool confirmation enforcement for sensitive operations.
+ * 5. Clean authentication abstraction via [GeminiAuthProvider].
+ * 6. Resilient error handling (network timeout, HTTP errors, malformed response) with fallback to [MockAIService].
  */
 class GeminiAIService(
-    private val fallbackService: AIService = MockAIService()
+    private val authProvider: GeminiAuthProvider = DevelopmentGeminiAuthProvider(),
+    private val fallbackService: AIService = MockAIService(),
+    var toolExecutor: ToolExecutor? = null
 ) : AIService {
 
-    private val tag = "GeminiAIService"
+    private val tag = "RafiqahAI"
 
-    private fun resolveApiKey(): String {
-        return try {
-            val clazz = Class.forName("com.example.BuildConfig")
-            val field = clazz.getField("GEMINI_API_KEY")
-            val key = field.get(null) as? String ?: ""
-            if (key == "MY_GEMINI_API_KEY" || key.isBlank()) "" else key
-        } catch (_: Exception) {
-            ""
-        }
-    }
+    val connectionMode: AIConnectionMode
+        get() = authProvider.connectionMode
 
     override suspend fun sendVoiceMessage(
         userSpeech: String,
         userProfileSummary: String,
         recentMemories: List<String>
     ): AIResponse {
-        val apiKey = resolveApiKey()
-        if (apiKey.isBlank()) {
+        val apiKey = authProvider.getApiKeyOrToken()
+        if (apiKey.isNullOrBlank()) {
+            Log.i(tag, "[$connectionMode] Gemini auth credentials not available. Using local fallback.")
             return fallbackService.sendVoiceMessage(userSpeech, userProfileSummary, recentMemories)
         }
 
         return withContext(Dispatchers.IO) {
             try {
+                Log.d(tag, "[$connectionMode] Calling Gemini text API with model ${AIConfig.GEMINI_DEFAULT_TEXT_MODEL}")
                 val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/${AIConfig.GEMINI_DEFAULT_TEXT_MODEL}:generateContent?key=$apiKey"
                 val conn = openPostConnection(endpoint)
 
@@ -77,7 +82,7 @@ class GeminiAIService(
                     التعليمات:
                     - أجيبي بالتونسي الأبيض الدافئ والمحترم.
                     - إذا كان الطلب يتطلب أداة (مثل جلب برنامج اليوم، حفظ موعد، إحضار الكلمات الفرنسية، إلخ)، استدعي الأداة المناسبة.
-                    - إذا كان عارضاً صحياً مقلقاً، انصحي بالطبيب دون تشخيص أو دواء.
+                    - إذا كان عارضاً صحياً مقلقاً، انصحي بالطبيب بهدوء دون تشخيص أو دواء.
                 """.trimIndent()
 
                 val requestJson = JSONObject().apply {
@@ -94,9 +99,44 @@ class GeminiAIService(
 
                 writeJsonToConnection(conn, requestJson)
 
-                if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                val responseCode = conn.responseCode
+                if (responseCode == HttpURLConnection.HTTP_OK) {
                     val responseStr = readResponse(conn)
                     val turnResult = parseTurnResult(responseStr)
+
+                    // Check for function call
+                    if (!turnResult.functionCallName.isNullOrBlank()) {
+                        val fnName = turnResult.functionCallName
+                        val fnArgs = turnResult.functionCallArgs
+
+                        Log.i(tag, "[$connectionMode] Function call received from Gemini: $fnName with args keys: ${fnArgs.keys}")
+
+                        val executor = toolExecutor
+                        if (executor != null) {
+                            if (executor.isConfirmationRequired(fnName, fnArgs)) {
+                                val confirmMsg = executor.getConfirmationMessage(fnName, fnArgs)
+                                return@withContext AIResponse(
+                                    replyText = confirmMsg,
+                                    spokenDialectText = confirmMsg,
+                                    isUrgentMedicalNotice = false
+                                )
+                            } else {
+                                // Execute tool and send second turn follow-up to Gemini
+                                val toolResult = executor.executeTool(fnName, fnArgs)
+                                val finalReply = sendToolResultFollowUp(
+                                    userSpeech = userSpeech,
+                                    functionName = fnName,
+                                    originalArgs = fnArgs,
+                                    toolResultString = toolResult
+                                )
+                                return@withContext AIResponse(
+                                    replyText = finalReply,
+                                    spokenDialectText = finalReply,
+                                    isUrgentMedicalNotice = false
+                                )
+                            }
+                        }
+                    }
 
                     AIResponse(
                         replyText = turnResult.replyText,
@@ -104,26 +144,28 @@ class GeminiAIService(
                         isUrgentMedicalNotice = turnResult.isUrgentMedical
                     )
                 } else {
-                    Log.w(tag, "Gemini returned ${conn.responseCode}, using fallback service")
+                    Log.w(tag, "[$connectionMode] Gemini API returned HTTP $responseCode. Using fallback service.")
                     fallbackService.sendVoiceMessage(userSpeech, userProfileSummary, recentMemories)
                 }
             } catch (e: Exception) {
-                Log.w(tag, "Gemini call failed: ${e.message}, safely using fallback")
+                Log.w(tag, "[$connectionMode] Gemini API call error: ${e.javaClass.simpleName}. Safely using fallback.")
                 fallbackService.sendVoiceMessage(userSpeech, userProfileSummary, recentMemories)
             }
         }
     }
 
     /**
-     * Executes the second turn of Function Calling: sends tool result back to Gemini for the final answer.
+     * Executes the second turn of Function Calling: sends functionResponse back to Gemini for the final natural language answer.
+     * Preserves original tool name and arguments.
      */
     suspend fun sendToolResultFollowUp(
         userSpeech: String,
         functionName: String,
+        originalArgs: Map<String, Any?>,
         toolResultString: String
     ): String {
-        val apiKey = resolveApiKey()
-        if (apiKey.isBlank()) return toolResultString
+        val apiKey = authProvider.getApiKeyOrToken()
+        if (apiKey.isNullOrBlank()) return toolResultString
 
         return withContext(Dispatchers.IO) {
             try {
@@ -132,21 +174,21 @@ class GeminiAIService(
 
                 val requestJson = JSONObject().apply {
                     put("contents", JSONArray().apply {
-                        // User message
+                        // User message turn
                         put(JSONObject().apply {
                             put("role", "user")
                             put("parts", JSONArray().apply {
                                 put(JSONObject().apply { put("text", userSpeech) })
                             })
                         })
-                        // Model function call turn
+                        // Model function call turn (preserving original arguments)
                         put(JSONObject().apply {
                             put("role", "model")
                             put("parts", JSONArray().apply {
                                 put(JSONObject().apply {
                                     put("functionCall", JSONObject().apply {
                                         put("name", functionName)
-                                        put("args", JSONObject())
+                                        put("args", JSONObject(originalArgs))
                                     })
                                 })
                             })
@@ -175,10 +217,11 @@ class GeminiAIService(
                     val turn = parseTurnResult(resp)
                     if (turn.replyText.isNotBlank()) turn.replyText else toolResultString
                 } else {
+                    Log.w(tag, "Follow up HTTP ${conn.responseCode}")
                     toolResultString
                 }
             } catch (e: Exception) {
-                Log.w(tag, "Follow up failed: ${e.message}")
+                Log.w(tag, "Follow up failed: ${e.javaClass.simpleName}")
                 toolResultString
             }
         }
@@ -189,8 +232,8 @@ class GeminiAIService(
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             doOutput = true
-            connectTimeout = 8000
-            readTimeout = 8000
+            connectTimeout = 10000
+            readTimeout = 15000
         }
     }
 
@@ -202,43 +245,48 @@ class GeminiAIService(
         return BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
     }
 
-    private fun parseTurnResult(responseStr: String): GeminiTurnResult {
-        val root = JSONObject(responseStr)
-        val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
-        val content = candidate?.optJSONObject("content")
-        val parts = content?.optJSONArray("parts")
+    fun parseTurnResult(responseStr: String): GeminiTurnResult {
+        return try {
+            val root = JSONObject(responseStr)
+            val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
+            val content = candidate?.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
 
-        var replyText = ""
-        var fnName: String? = null
-        val fnArgs = mutableMapOf<String, Any?>()
+            var replyText = ""
+            var fnName: String? = null
+            val fnArgs = mutableMapOf<String, Any?>()
 
-        if (parts != null) {
-            for (i in 0 until parts.length()) {
-                val part = parts.optJSONObject(i) ?: continue
-                if (part.has("text")) {
-                    replyText += part.optString("text")
-                }
-                if (part.has("functionCall")) {
-                    val fn = part.getJSONObject("functionCall")
-                    fnName = fn.optString("name")
-                    val argsObj = fn.optJSONObject("args")
-                    if (argsObj != null) {
-                        val it = argsObj.keys()
-                        while (it.hasNext()) {
-                            val k = it.next()
-                            fnArgs[k] = argsObj.get(k)
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    val part = parts.optJSONObject(i) ?: continue
+                    if (part.has("text")) {
+                        replyText += part.optString("text")
+                    }
+                    if (part.has("functionCall")) {
+                        val fn = part.getJSONObject("functionCall")
+                        fnName = fn.optString("name")
+                        val argsObj = fn.optJSONObject("args")
+                        if (argsObj != null) {
+                            val it = argsObj.keys()
+                            while (it.hasNext()) {
+                                val k = it.next()
+                                fnArgs[k] = argsObj.get(k)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        return GeminiTurnResult(
-            replyText = replyText.trim(),
-            functionCallName = fnName,
-            functionCallArgs = fnArgs,
-            isUrgentMedical = replyText.contains("190") || replyText.contains("استعجالي")
-        )
+            GeminiTurnResult(
+                replyText = replyText.trim(),
+                functionCallName = fnName,
+                functionCallArgs = fnArgs,
+                isUrgentMedical = replyText.contains("190") || replyText.contains("استعجالي")
+            )
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to parse Gemini response: ${e.message}")
+            GeminiTurnResult(replyText = "")
+        }
     }
 
     override suspend fun getProgressiveConceptExplanation(conceptKey: String, level: Int): String {

@@ -80,7 +80,7 @@ class LiveVoiceService(
      * Interrupts current assistant playback immediately.
      */
     fun interrupt() {
-        geminiLiveService.interrupt()
+        geminiLiveService.interruptPlayback()
     }
 
     /**

@@ -2,9 +2,11 @@ package com.example.data.repository
 
 import com.example.data.local.dao.DailyTaskDao
 import com.example.data.local.dao.FrenchWordDao
+import com.example.data.local.dao.LearningProgressDao
 import com.example.data.local.dao.MemoryDao
 import com.example.data.local.dao.ProfileDao
 import com.example.data.local.dao.StoryDao
+import com.example.data.local.entity.ConceptProgressEntity
 import com.example.data.local.entity.DailyTaskEntity
 import com.example.data.local.entity.FrenchWordEntity
 import com.example.data.local.entity.MemoryEntity
@@ -319,5 +321,41 @@ class FrenchWordRepository(private val frenchWordDao: FrenchWordDao) {
             interactivePrompt = interactivePrompt,
             isMastered = isMastered
         )
+    }
+}
+
+class LearningProgressRepository(
+    private val learningProgressDao: LearningProgressDao
+) {
+    fun getAllProgressFlow(): Flow<List<ConceptProgressEntity>> {
+        return learningProgressDao.getAllProgressFlow()
+    }
+
+    suspend fun getAllProgressList(): List<ConceptProgressEntity> {
+        return learningProgressDao.getAllProgressList()
+    }
+
+    suspend fun getProgress(conceptKey: String): ConceptProgressEntity? {
+        return learningProgressDao.getProgress(conceptKey)
+    }
+
+    suspend fun saveProgress(
+        conceptKey: String,
+        currentLevel: Int,
+        mastery: String,
+        needsReview: Boolean,
+        attempts: Int,
+        successfulAttempts: Int
+    ) {
+        val entity = ConceptProgressEntity(
+            conceptKey = conceptKey,
+            currentLevel = currentLevel,
+            mastery = mastery,
+            needsReview = needsReview,
+            attempts = attempts,
+            successfulAttempts = successfulAttempts,
+            lastReviewed = System.currentTimeMillis()
+        )
+        learningProgressDao.insertOrUpdate(entity)
     }
 }

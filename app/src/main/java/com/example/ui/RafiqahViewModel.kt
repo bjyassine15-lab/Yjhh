@@ -8,6 +8,8 @@ import com.example.ai.LiveVoiceService
 import com.example.ai.LiveVoiceState
 import com.example.ai.MockAIService
 import com.example.ai.VoiceService
+import com.example.ai.auth.DevelopmentGeminiAuthProvider
+import com.example.ai.auth.GeminiAuthProvider
 import com.example.ai.context.ContextBuilder
 import com.example.ai.learning.LearningEngine
 import com.example.ai.live.GeminiLiveService
@@ -19,6 +21,7 @@ import com.example.ai.tools.ToolExecutor
 import com.example.data.local.AppDatabase
 import com.example.data.repository.DailyPlannerRepository
 import com.example.data.repository.FrenchWordRepository
+import com.example.data.repository.LearningProgressRepository
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.ProfileRepository
 import com.example.data.repository.StoryRepository
@@ -43,7 +46,8 @@ import java.util.UUID
 data class PendingActionConfirmation(
     val title: String,
     val description: String,
-    val onConfirmAction: () -> Unit
+    val onConfirmAction: () -> Unit,
+    val onRejectAction: () -> Unit = {}
 )
 
 class RafiqahViewModel(application: Application) : AndroidViewModel(application) {
@@ -54,10 +58,10 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     val storyRepo = StoryRepository(db.storyDao())
     val plannerRepo = DailyPlannerRepository(db.dailyTaskDao())
     val frenchRepo = FrenchWordRepository(db.frenchWordDao())
+    val learningProgressRepo = LearningProgressRepository(db.learningProgressDao())
 
-    val voiceService = VoiceService(application)
-    val geminiLiveService = GeminiLiveService(application, voiceService)
-    val liveVoiceService = LiveVoiceService(application, voiceService, geminiLiveService)
+    // Gemini Authentication Abstraction
+    val authProvider: GeminiAuthProvider = DevelopmentGeminiAuthProvider()
 
     val toolExecutor = ToolExecutor(
         profileRepo = profileRepo,
@@ -67,14 +71,29 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         frenchRepo = frenchRepo
     )
 
-    val learningEngine = LearningEngine()
+    val voiceService = VoiceService(application)
+    val geminiLiveService = GeminiLiveService(
+        context = application,
+        fallbackVoiceService = voiceService,
+        authProvider = authProvider,
+        toolExecutor = toolExecutor
+    )
+    val liveVoiceService = LiveVoiceService(application, voiceService, geminiLiveService)
+
+    val learningEngine = LearningEngine(repository = learningProgressRepo)
     val storyEngine = StoryEngine()
     val medicalSafetyGuard = MedicalSafetyGuard()
     val memoryManager = MemoryManager()
     val contextBuilder = ContextBuilder()
 
+    val geminiAIService = GeminiAIService(
+        authProvider = authProvider,
+        fallbackService = MockAIService(),
+        toolExecutor = toolExecutor
+    )
+
     val aiRepository = AIRepository(
-        aiService = GeminiAIService(fallbackService = MockAIService()),
+        aiService = geminiAIService,
         toolExecutor = toolExecutor,
         memoryRepo = memoryRepo,
         contextBuilder = contextBuilder,
@@ -110,6 +129,10 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     private val _pendingConfirmation = MutableStateFlow<PendingActionConfirmation?>(null)
     val pendingConfirmation: StateFlow<PendingActionConfirmation?> = _pendingConfirmation.asStateFlow()
 
+    // Pending approval for sensitive memory items (e.g. medical conditions / medications)
+    private val _pendingMemoryApproval = MutableStateFlow<MemoryManager.MemoryCandidate?>(null)
+    val pendingMemoryApproval: StateFlow<MemoryManager.MemoryCandidate?> = _pendingMemoryApproval.asStateFlow()
+
     private val _messages = MutableStateFlow<List<ConversationMessage>>(
         listOf(
             ConversationMessage(
@@ -125,6 +148,13 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             AppDatabase.seedInitialData(db)
+        }
+        // Collect live tool events for logging and UI awareness
+        viewModelScope.launch {
+            geminiLiveService.toolCallEvents.collect { event ->
+                val notice = "استدعاء أداة: ${event.functionName}"
+                android.util.Log.d("RafiqahViewModel", notice)
+            }
         }
     }
 
@@ -172,6 +202,11 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
             // Speak the reply in warm dialect
             voiceService.speak(response.spokenDialectText, "ar")
 
+            // Check if sensitive memory candidate requires explicit approval
+            if (response.pendingMemoryCandidate != null) {
+                _pendingMemoryApproval.value = response.pendingMemoryCandidate
+            }
+
             // Check if tool execution requires confirmation
             val pending = response.pendingActionConfirmation
             if (pending != null) {
@@ -182,6 +217,13 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
                         viewModelScope.launch {
                             val result = aiRepository.executeConfirmedTool(pending.toolName, pending.arguments)
                             speakText(result, "ar")
+                        }
+                        _pendingConfirmation.value = null
+                    },
+                    onRejectAction = {
+                        viewModelScope.launch {
+                            val declineNotice = aiRepository.handleRejectedConfirmation(pending.toolName)
+                            speakText(declineNotice, "ar")
                         }
                         _pendingConfirmation.value = null
                     }
@@ -195,7 +237,23 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun dismissPendingAction() {
+        val pending = _pendingConfirmation.value
         _pendingConfirmation.value = null
+        pending?.onRejectAction?.invoke()
+    }
+
+    fun approveMemoryCandidate() {
+        val candidate = _pendingMemoryApproval.value ?: return
+        viewModelScope.launch {
+            aiRepository.approveAndSaveMemory(candidate)
+            _pendingMemoryApproval.value = null
+            speakText("تم حفظ المعلومة في الذاكرة يا أمي 🌷", "ar")
+        }
+    }
+
+    fun rejectMemoryCandidate() {
+        _pendingMemoryApproval.value = null
+        speakText("باهي يا أمي، لم يتم حفظ هذه المعلومة 🌷", "ar")
     }
 
     // Live Voice Engine controls

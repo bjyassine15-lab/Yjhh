@@ -72,3 +72,14 @@ data class FrenchWordEntity(
     val interactivePrompt: String,
     val isMastered: Boolean
 )
+
+@Entity(tableName = "concept_progress")
+data class ConceptProgressEntity(
+    @PrimaryKey val conceptKey: String,
+    val currentLevel: Int = 1,
+    val mastery: String = "NOT_STARTED",
+    val needsReview: Boolean = false,
+    val attempts: Int = 0,
+    val successfulAttempts: Int = 0,
+    val lastReviewed: Long = System.currentTimeMillis()
+)

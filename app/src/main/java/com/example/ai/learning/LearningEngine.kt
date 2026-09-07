@@ -1,5 +1,10 @@
 package com.example.ai.learning
 
+import com.example.data.repository.LearningProgressRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 /**
  * Mastery states for educational concepts in Rafiqah V2.1.
  */
@@ -37,10 +42,13 @@ data class AdaptiveQuestion(
 )
 
 /**
- * Adaptive Learning Engine for Rafiqah V2.1.
- * Adjusts explanation depth levels and dynamically updates concept mastery.
+ * Adaptive Learning Engine for Rafiqah V2.5.
+ * Adjusts explanation depth levels and dynamically updates concept mastery with Room persistence.
  */
-class LearningEngine {
+class LearningEngine(
+    private val repository: LearningProgressRepository? = null,
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+) {
 
     private val conceptsProgress = mutableMapOf<String, ConceptProgress>()
 
@@ -50,20 +58,66 @@ class LearningEngine {
         registerConcept("membrane", "غشاء الخلية", 1)
         registerConcept("nucleus", "نواة الخلية وDNA", 1)
         registerConcept("mitochondria", "الميتوكوندريا والطاقة", 1)
+
+        repository?.let { repo ->
+            scope.launch {
+                loadFromRepository(repo)
+            }
+        }
+    }
+
+    suspend fun loadFromRepository(repo: LearningProgressRepository) {
+        val list = repo.getAllProgressList()
+        list.forEach { entity ->
+            val mastery = try {
+                ConceptMastery.valueOf(entity.mastery)
+            } catch (_: Exception) {
+                ConceptMastery.NOT_STARTED
+            }
+            conceptsProgress[entity.conceptKey] = ConceptProgress(
+                conceptKey = entity.conceptKey,
+                currentLevel = entity.currentLevel,
+                mastery = mastery,
+                needsReview = entity.needsReview,
+                attempts = entity.attempts,
+                successfulAttempts = entity.successfulAttempts,
+                lastReviewed = entity.lastReviewed
+            )
+        }
+    }
+
+    private fun persistProgress(progress: ConceptProgress) {
+        repository?.let { repo ->
+            scope.launch {
+                repo.saveProgress(
+                    conceptKey = progress.conceptKey,
+                    currentLevel = progress.currentLevel,
+                    mastery = progress.mastery.name,
+                    needsReview = progress.needsReview,
+                    attempts = progress.attempts,
+                    successfulAttempts = progress.successfulAttempts
+                )
+            }
+        }
     }
 
     fun registerConcept(key: String, label: String, initialLevel: Int = 1) {
         val existing = conceptsProgress[key]
         if (existing == null) {
-            conceptsProgress[key] = ConceptProgress(conceptKey = key, currentLevel = initialLevel)
+            val created = ConceptProgress(conceptKey = key, currentLevel = initialLevel)
+            conceptsProgress[key] = created
+            persistProgress(created)
         } else {
             existing.currentLevel = initialLevel
+            persistProgress(existing)
         }
     }
 
     fun getConceptProgress(key: String): ConceptProgress {
         return conceptsProgress.getOrPut(key) {
-            ConceptProgress(conceptKey = key, currentLevel = 1)
+            val created = ConceptProgress(conceptKey = key, currentLevel = 1)
+            persistProgress(created)
+            created
         }
     }
 
@@ -76,6 +130,7 @@ class LearningEngine {
         progress.currentLevel = (progress.currentLevel - 1).coerceAtLeast(1)
         progress.mastery = ConceptMastery.REVIEW
         progress.lastReviewed = System.currentTimeMillis()
+        persistProgress(progress)
     }
 
     fun onUserUnderstood(conceptKey: String) {
@@ -86,6 +141,7 @@ class LearningEngine {
         progress.currentLevel = (progress.currentLevel + 1).coerceAtMost(5)
         progress.mastery = if (progress.currentLevel >= 4) ConceptMastery.MASTERED else ConceptMastery.LEARNING
         progress.lastReviewed = System.currentTimeMillis()
+        persistProgress(progress)
     }
 
     fun getLevelDescription(level: Int): String {

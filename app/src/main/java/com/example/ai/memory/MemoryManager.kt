@@ -18,7 +18,9 @@ class MemoryManager {
         val content: String,
         val importance: Int, // 1 to 5
         val confidence: Float = 0.9f,
-        val source: String = "محادثة ذكية"
+        val source: String = "محادثة ذكية",
+        val requiresApproval: Boolean = false,
+        var userApproved: Boolean = false
     )
 
     private val transientChitchatPatterns = listOf(
@@ -51,7 +53,17 @@ class MemoryManager {
 
                     if (isValidMemoryContent(content)) {
                         val cat = try { MemoryCategory.valueOf(catStr) } catch (_: Exception) { MemoryCategory.PERSONAL }
-                        candidates.add(MemoryCandidate(cat, content, importance, confidence, "استخراج الذكاء الاصطناعي"))
+                        val isSensitive = cat == MemoryCategory.HEALTH || importance >= 4 || confidence < 0.92f
+                        candidates.add(
+                            MemoryCandidate(
+                                category = cat,
+                                content = content,
+                                importance = importance,
+                                confidence = confidence,
+                                source = "استخراج الذكاء الاصطناعي",
+                                requiresApproval = isSensitive
+                            )
+                        )
                     }
                 }
             } catch (_: Exception) {
@@ -140,35 +152,42 @@ class MemoryManager {
             )
         }
 
-        // 3. Health observations
+        // 3. Health observations (Only personal health statements, not casual questions)
+        val hasFirstPersonHealthContext = text.contains("عندي") || text.contains("قست") ||
+                text.contains("شربت") || text.contains("وجعني") || text.contains("راسي") ||
+                text.contains("نحس") || text.contains("طبيبي قال") || text.contains("طالعة")
+
         if (text.contains("نومي") || text.contains("ما رقدتش") || text.contains("نوم مقلق")) {
             candidates.add(
                 MemoryCandidate(
                     category = MemoryCategory.HEALTH,
                     content = "أفادت أمي بوجود صعوبة أو تقطع في النوم: \"$userUtterance\"",
                     importance = 4,
-                    confidence = 0.95f
+                    confidence = 0.95f,
+                    requiresApproval = true
                 )
             )
-        } else if (text.contains("تونسيو") || text.contains("ضغط") || text.contains("دواء") || text.contains("طبيب")) {
+        } else if ((text.contains("تونسيو") || text.contains("ضغط") || text.contains("دواء") || text.contains("طبيب")) && hasFirstPersonHealthContext) {
             candidates.add(
                 MemoryCandidate(
                     category = MemoryCategory.HEALTH,
                     content = "ملاحظة صحية أبلغت عنها أمي: \"$userUtterance\"",
                     importance = 4,
-                    confidence = 0.90f
+                    confidence = 0.90f,
+                    requiresApproval = true
                 )
             )
         }
 
         // 4. Daily Routine
-        if (text.contains("موعد") || text.contains("طبيب") || text.contains("غدوة على") || text.contains("اليوم على")) {
+        if ((text.contains("موعد") || text.contains("طبيب") || text.contains("غدوة على") || text.contains("اليوم على")) && hasFirstPersonHealthContext) {
             candidates.add(
                 MemoryCandidate(
                     category = MemoryCategory.DAILY_ROUTINE,
                     content = "موعد أو التزام يومي لأمي: \"$userUtterance\"",
                     importance = 4,
-                    confidence = 0.90f
+                    confidence = 0.90f,
+                    requiresApproval = true
                 )
             )
         }
