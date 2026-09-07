@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Card
@@ -73,6 +74,7 @@ fun HomeScreen(
     onNavigateToPlanner: () -> Unit,
     onNavigateToFrench: () -> Unit,
     onNavigateToProfile: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
     onSpeakGreeting: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -117,6 +119,16 @@ fun HomeScreen(
                         Icon(
                             imageVector = Icons.Default.Person,
                             contentDescription = "ملف أمي والذاكرة",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    IconButton(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.testTag("settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "الإعدادات",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }

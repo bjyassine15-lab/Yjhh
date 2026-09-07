@@ -106,8 +106,10 @@ class GeminiLiveService(
         scope.launch {
             val apiKey = authProvider.getApiKeyOrToken()
             if (apiKey.isNullOrBlank()) {
-                Log.i(tag, "No Gemini API key resolved. Launching local live voice simulation.")
-                startLocalSimulation(onGreetingSpoken)
+                Log.i(tag, "No Gemini API key resolved. Informing user to set API key in settings.")
+                _sessionState.value = LiveSessionState.ERROR
+                _liveTranscript.value = "يرجى إدخال وحفظ مفتاح Gemini API من شاشة الإعدادات ⚙️ لتشغيل المحادثة الصوتية الحية."
+                fallbackVoiceService.speak("يا أمي، يرجى إضافة مفتاح Gemini من الإعدادات لتشغيل الصوت الحي.", "ar")
                 return@launch
             }
 
@@ -176,9 +178,10 @@ class GeminiLiveService(
                 startLiveSession(onGreetingSpoken)
             }
         } else {
-            Log.w(tag, "Max reconnect attempts reached. Switching safely to local fallback mode.")
+            Log.w(tag, "Max reconnect attempts reached. Live session failed.")
             _sessionState.value = LiveSessionState.ERROR
-            startLocalSimulation(onGreetingSpoken)
+            _liveTranscript.value = "تعذر الاتصال بـ Gemini Live. يرجى التحقق من المفتاح والإنترنت من الإعدادات ⚙️"
+            fallbackVoiceService.speak("يا أمي تعذر الاتصال بـ Gemini، ثبت في المفتاح والإنترنت في الإعدادات.", "ar")
         }
     }
 

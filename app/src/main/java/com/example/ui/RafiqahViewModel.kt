@@ -8,8 +8,13 @@ import com.example.ai.LiveVoiceService
 import com.example.ai.LiveVoiceState
 import com.example.ai.MockAIService
 import com.example.ai.VoiceService
+import com.example.ai.auth.ConnectionTestResult
 import com.example.ai.auth.DevelopmentGeminiAuthProvider
+import com.example.ai.auth.DynamicGeminiAuthProvider
+import com.example.ai.auth.EncryptedGeminiApiKeyStore
+import com.example.ai.auth.GeminiApiKeyStore
 import com.example.ai.auth.GeminiAuthProvider
+import com.example.ai.auth.GeminiConnectionStatus
 import com.example.ai.context.ContextBuilder
 import com.example.ai.learning.LearningEngine
 import com.example.ai.live.GeminiLiveService
@@ -60,8 +65,33 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     val frenchRepo = FrenchWordRepository(db.frenchWordDao())
     val learningProgressRepo = LearningProgressRepository(db.learningProgressDao())
 
-    // Gemini Authentication Abstraction
-    val authProvider: GeminiAuthProvider = DevelopmentGeminiAuthProvider()
+    // Gemini Authentication Abstraction & Secure Store (V2.6)
+    val keyStore: GeminiApiKeyStore = EncryptedGeminiApiKeyStore(application)
+    val authProvider: DynamicGeminiAuthProvider = DynamicGeminiAuthProvider(keyStore)
+
+    val geminiConnectionStatus: StateFlow<GeminiConnectionStatus> = authProvider.connectionStatus
+
+    private val _maskedApiKey = MutableStateFlow(keyStore.getMaskedApiKey())
+    val maskedApiKey: StateFlow<String?> = _maskedApiKey.asStateFlow()
+
+    fun saveApiKey(key: String) {
+        val trimmed = key.trim()
+        keyStore.saveApiKey(trimmed)
+        _maskedApiKey.value = keyStore.getMaskedApiKey()
+        authProvider.updateStatus(
+            if (trimmed.isNotBlank()) GeminiConnectionStatus.CONFIGURED else GeminiConnectionStatus.NOT_CONFIGURED
+        )
+    }
+
+    fun clearApiKey() {
+        keyStore.clearApiKey()
+        _maskedApiKey.value = null
+        authProvider.updateStatus(GeminiConnectionStatus.NOT_CONFIGURED)
+    }
+
+    suspend fun testGeminiConnection(): ConnectionTestResult {
+        return authProvider.testConnection()
+    }
 
     val toolExecutor = ToolExecutor(
         profileRepo = profileRepo,

@@ -57,8 +57,12 @@ class GeminiAIService(
     ): AIResponse {
         val apiKey = authProvider.getApiKeyOrToken()
         if (apiKey.isNullOrBlank()) {
-            Log.i(tag, "[$connectionMode] Gemini auth credentials not available. Using local fallback.")
-            return fallbackService.sendVoiceMessage(userSpeech, userProfileSummary, recentMemories)
+            Log.i(tag, "[$connectionMode] Gemini auth credentials not configured. Notifying user to configure in Settings.")
+            return AIResponse(
+                replyText = "أهلاً يا أمي الحبيبة 🌷 لتشغيل رفيقة بذكاء Gemini، يرجى إضافة مفتاح Gemini API من شاشة الإعدادات ⚙️",
+                spokenDialectText = "على سلامتك يا أمي، لتشغيل رفيقة مع Gemini يرجى إضافة المفتاح من الإعدادات.",
+                isUrgentMedicalNotice = false
+            )
         }
 
         return withContext(Dispatchers.IO) {
@@ -144,12 +148,30 @@ class GeminiAIService(
                         isUrgentMedicalNotice = turnResult.isUrgentMedical
                     )
                 } else {
-                    Log.w(tag, "[$connectionMode] Gemini API returned HTTP $responseCode. Using fallback service.")
-                    fallbackService.sendVoiceMessage(userSpeech, userProfileSummary, recentMemories)
+                    Log.w(tag, "[$connectionMode] Gemini API returned HTTP $responseCode")
+                    val errorMsg = when (responseCode) {
+                        400, 401, 403 -> "تعذر الاتصال: مفتاح Gemini API غير صالح أو غير مصرح له. يرجى مراجعته في الإعدادات ⚙️"
+                        429 -> "تم تجاوز حد استخدام Gemini (Quota Exceeded). يرجى الانتظار دقيقة والمحاولة مجدداً ⏳"
+                        else -> "تعذر الاتصال بـ Gemini (رمز الخطأ: $responseCode)."
+                    }
+                    AIResponse(
+                        replyText = errorMsg,
+                        spokenDialectText = "يا أمي تعذر الاتصال بـ Gemini، ثبت في الإعدادات يعيشك.",
+                        isUrgentMedicalNotice = false
+                    )
                 }
             } catch (e: Exception) {
-                Log.w(tag, "[$connectionMode] Gemini API call error: ${e.javaClass.simpleName}. Safely using fallback.")
-                fallbackService.sendVoiceMessage(userSpeech, userProfileSummary, recentMemories)
+                Log.w(tag, "[$connectionMode] Gemini API call error: ${e.javaClass.simpleName}")
+                val errorMsg = when (e) {
+                    is java.net.UnknownHostException -> "تعذر الاتصال بـ Gemini: يرجى التحقق من اتصال الإنترنت 📶"
+                    is java.net.SocketTimeoutException -> "انتهت مهلة الاتصال بـ Gemini، يرجى المحاولة مجدداً ⏱️"
+                    else -> "تعذر الاتصال بـ Gemini: يرجى التحقق من الشبكة والإعدادات."
+                }
+                AIResponse(
+                    replyText = errorMsg,
+                    spokenDialectText = "يا أمي فما مشكلة في الإنترنت، ثبت في الاتصال يعيشك.",
+                    isUrgentMedicalNotice = false
+                )
             }
         }
     }

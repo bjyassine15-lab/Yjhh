@@ -16,6 +16,7 @@ import com.example.ui.learning.FocusSessionScreen
 import com.example.ui.learning.LearningScreen
 import com.example.ui.planner.PlannerScreen
 import com.example.ui.profile.ProfileScreen
+import com.example.ui.settings.SettingsScreen
 import com.example.ui.stories.StoryScreen
 import com.example.ui.voice.VoiceAssistantScreen
 
@@ -29,6 +30,7 @@ object RafiqahDestinations {
     const val PLANNER = "planner"
     const val FRENCH = "french"
     const val PROFILE = "profile"
+    const val SETTINGS = "settings"
 }
 
 @Composable
@@ -48,6 +50,8 @@ fun RafiqahNavGraph(
     val liveTranscript by viewModel.liveTranscript.collectAsState()
     val isLiveSessionActive by viewModel.isLiveSessionActive.collectAsState()
     val pendingConfirmation by viewModel.pendingConfirmation.collectAsState()
+    val geminiConnectionStatus by viewModel.geminiConnectionStatus.collectAsState()
+    val maskedApiKey by viewModel.maskedApiKey.collectAsState()
 
     NavHost(
         navController = navController,
@@ -65,6 +69,7 @@ fun RafiqahNavGraph(
                 onNavigateToPlanner = { navController.navigate(RafiqahDestinations.PLANNER) },
                 onNavigateToFrench = { navController.navigate(RafiqahDestinations.FRENCH) },
                 onNavigateToProfile = { navController.navigate(RafiqahDestinations.PROFILE) },
+                onNavigateToSettings = { navController.navigate(RafiqahDestinations.SETTINGS) },
                 onSpeakGreeting = { viewModel.speakText(it) }
             )
         }
@@ -73,6 +78,7 @@ fun RafiqahNavGraph(
             VoiceAssistantScreen(
                 messages = messages,
                 liveVoiceState = liveVoiceState,
+                geminiConnectionStatus = geminiConnectionStatus,
                 liveTranscript = liveTranscript,
                 isLiveSessionActive = isLiveSessionActive,
                 pendingConfirmation = pendingConfirmation,
@@ -85,6 +91,7 @@ fun RafiqahNavGraph(
                 onSendMessage = { viewModel.sendVoiceMessage(it) },
                 onSpeak = { viewModel.speakText(it) },
                 onStopSpeech = { viewModel.stopSpeaking() },
+                onNavigateToSettings = { navController.navigate(RafiqahDestinations.SETTINGS) },
                 onNavigateBack = { navController.popBackStack() }
             )
         }
@@ -156,6 +163,17 @@ fun RafiqahNavGraph(
                 onDeleteMemory = { viewModel.deleteMemory(it) },
                 onNavigateBack = { navController.popBackStack() },
                 onSpeak = { viewModel.speakText(it) }
+            )
+        }
+
+        composable(RafiqahDestinations.SETTINGS) {
+            SettingsScreen(
+                connectionStatus = geminiConnectionStatus,
+                maskedApiKey = maskedApiKey,
+                onSaveApiKey = { viewModel.saveApiKey(it) },
+                onClearApiKey = { viewModel.clearApiKey() },
+                onTestConnection = { viewModel.testGeminiConnection() },
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }

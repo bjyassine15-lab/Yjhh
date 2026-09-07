@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,11 +30,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
@@ -65,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai.LiveVoiceState
+import com.example.ai.auth.GeminiConnectionStatus
 import com.example.domain.model.ConversationMessage
 import com.example.domain.model.MessageSender
 import com.example.ui.PendingActionConfirmation
@@ -78,6 +85,7 @@ import com.example.ui.theme.TerracottaAccent
 fun VoiceAssistantScreen(
     messages: List<ConversationMessage>,
     liveVoiceState: LiveVoiceState = LiveVoiceState.IDLE,
+    geminiConnectionStatus: GeminiConnectionStatus = GeminiConnectionStatus.NOT_CONFIGURED,
     liveTranscript: String = "",
     isLiveSessionActive: Boolean = false,
     pendingConfirmation: PendingActionConfirmation? = null,
@@ -90,6 +98,7 @@ fun VoiceAssistantScreen(
     onSendMessage: (String) -> Unit,
     onSpeak: (String) -> Unit,
     onStopSpeech: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -196,6 +205,17 @@ fun VoiceAssistantScreen(
                             )
                         }
                     }
+
+                    IconButton(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.testTag("voice_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "الإعدادات",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -209,6 +229,63 @@ fun VoiceAssistantScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // Gemini Connection Status Indicator Pill
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        when (geminiConnectionStatus) {
+                            GeminiConnectionStatus.CONNECTED -> SageOlive.copy(alpha = 0.12f)
+                            GeminiConnectionStatus.FAILED -> TerracottaAccent.copy(alpha = 0.12f)
+                            GeminiConnectionStatus.CONFIGURED -> GoldAccent.copy(alpha = 0.12f)
+                            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        }
+                    )
+                    .clickable { onNavigateToSettings() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("voice_gemini_status_pill")
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = when (geminiConnectionStatus) {
+                            GeminiConnectionStatus.CONNECTED -> Icons.Default.CloudDone
+                            GeminiConnectionStatus.FAILED -> Icons.Default.CloudOff
+                            GeminiConnectionStatus.CONFIGURED -> Icons.Default.CloudQueue
+                            else -> Icons.Default.Key
+                        },
+                        contentDescription = null,
+                        tint = when (geminiConnectionStatus) {
+                            GeminiConnectionStatus.CONNECTED -> SageOlive
+                            GeminiConnectionStatus.FAILED -> TerracottaAccent
+                            GeminiConnectionStatus.CONFIGURED -> GoldAccent
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Gemini: ${geminiConnectionStatus.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = when (geminiConnectionStatus) {
+                            GeminiConnectionStatus.CONNECTED -> SageOlive
+                            GeminiConnectionStatus.FAILED -> TerracottaAccent
+                            GeminiConnectionStatus.CONFIGURED -> GoldAccent
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+
+                Text(
+                    text = if (geminiConnectionStatus == GeminiConnectionStatus.CONNECTED) "إدارة ⚙️" else "تهيئة المفتاح ⚙️",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = RafiqahRose
+                )
+            }
             // Natural Confirmation Banner if sensitive action pending
             AnimatedVisibility(visible = pendingConfirmation != null) {
                 pendingConfirmation?.let { conf ->
