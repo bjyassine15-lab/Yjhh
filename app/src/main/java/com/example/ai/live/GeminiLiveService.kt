@@ -12,6 +12,7 @@ import com.example.ai.live.audio.AudioOutput
 import com.example.ai.live.audio.HardwarePcmAudioInput
 import com.example.ai.live.audio.HardwarePcmAudioOutput
 import com.example.ai.tools.AIToolRegistry
+import com.example.ai.tools.ToolAccessLevel
 import com.example.ai.tools.ToolExecutor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -53,6 +55,22 @@ data class LiveToolCallEvent(
     val callId: String,
     val functionName: String,
     val arguments: Map<String, Any?>
+)
+
+data class LiveToolConfirmation(
+    val callId: String,
+    val functionName: String,
+    val arguments: Map<String, Any?>,
+    val title: String,
+    val description: String,
+    val onConfirm: suspend () -> Unit = {},
+    val onReject: suspend () -> Unit = {}
+)
+
+data class ToolResponseData(
+    val callId: String,
+    val functionName: String,
+    val result: String
 )
 
 /**
@@ -86,6 +104,17 @@ class GeminiLiveService(
 
     private val _toolCallEvents = MutableSharedFlow<LiveToolCallEvent>()
     val toolCallEvents: SharedFlow<LiveToolCallEvent> = _toolCallEvents.asSharedFlow()
+
+    val pendingConfirmationsMap = ConcurrentHashMap<String, LiveToolConfirmation>()
+
+    private val _pendingToolConfirmation = MutableStateFlow<LiveToolConfirmation?>(null)
+    val pendingToolConfirmation: StateFlow<LiveToolConfirmation?> = _pendingToolConfirmation.asStateFlow()
+
+    private val _toolConfirmationEvents = MutableSharedFlow<LiveToolConfirmation>(replay = 1)
+    val toolConfirmationEvents: SharedFlow<LiveToolConfirmation> = _toolConfirmationEvents.asSharedFlow()
+
+    var lastSentToolResult: ToolResponseData? = null
+        private set
 
     private var webSocket: WebSocket? = null
     private val okHttpClient = OkHttpClient.Builder()
@@ -352,12 +381,7 @@ class GeminiLiveService(
                             }
 
                             scope.launch {
-                                _toolCallEvents.emit(LiveToolCallEvent(id, name, argsMap))
-                                // If tool executor is registered, execute immediately and return result
-                                toolExecutor?.let { executor ->
-                                    val result = executor.executeTool(name, argsMap)
-                                    sendToolResult(id, name, result)
-                                }
+                                handleFunctionCall(id, name, argsMap)
                             }
                         }
                     }
@@ -378,9 +402,116 @@ class GeminiLiveService(
     }
 
     /**
+     * Dispatches function call received from Gemini Live API.
+     * Evaluates tool access level and security policy:
+     * - READ_TOOL: executed directly without confirmation.
+     * - SAFE_WRITE: executed directly per existing safety policy.
+     * - SENSITIVE_WRITE: pauses execution without running the tool, issuing LiveToolConfirmation for user approval.
+     */
+    suspend fun handleFunctionCall(callId: String, functionName: String, arguments: Map<String, Any?>) {
+        _toolCallEvents.emit(LiveToolCallEvent(callId, functionName, arguments))
+
+        val toolDef = AIToolRegistry.TOOLS.find { it.name == functionName }
+        val accessLevel = toolDef?.accessLevel ?: ToolAccessLevel.READ_TOOL
+        val executor = toolExecutor
+
+        val requiresConfirmation = if (executor != null) {
+            executor.isConfirmationRequired(functionName, arguments)
+        } else {
+            accessLevel == ToolAccessLevel.SENSITIVE_WRITE
+        }
+
+        when {
+            // 1. READ_TOOL executes automatically
+            accessLevel == ToolAccessLevel.READ_TOOL && !requiresConfirmation -> {
+                Log.d(tag, "Executing READ_TOOL directly: $functionName")
+                executor?.let { exec ->
+                    val result = exec.executeTool(functionName, arguments)
+                    sendToolResult(callId, functionName, result)
+                }
+            }
+
+            // 2. SAFE_WRITE follows existing policy
+            accessLevel == ToolAccessLevel.SAFE_WRITE && !requiresConfirmation -> {
+                Log.d(tag, "Executing SAFE_WRITE directly: $functionName")
+                executor?.let { exec ->
+                    val result = exec.executeTool(functionName, arguments)
+                    sendToolResult(callId, functionName, result)
+                }
+            }
+
+            // 3. SENSITIVE_WRITE pauses for confirmation
+            else -> {
+                Log.i(tag, "SENSITIVE_WRITE intercepted for user confirmation: $functionName ($callId)")
+                val title = when (functionName) {
+                    "add_daily_task" -> "تأكيد موعد أو مهمة"
+                    "delete_memory" -> "تأكيد حذف من الذاكرة"
+                    "save_health_note" -> "تأكيد تسجيل ملاحظة صحية"
+                    else -> "تأكيد إجراء حساس"
+                }
+                val description = executor?.getConfirmationMessage(functionName, arguments)
+                    ?: "تحبي نأكد هذا الإجراء يا أمي؟"
+
+                val confirmation = LiveToolConfirmation(
+                    callId = callId,
+                    functionName = functionName,
+                    arguments = arguments,
+                    title = title,
+                    description = description,
+                    onConfirm = { confirmLiveTool(callId) },
+                    onReject = { rejectLiveTool(callId) }
+                )
+
+                pendingConfirmationsMap[callId] = confirmation
+                _pendingToolConfirmation.value = confirmation
+                _toolConfirmationEvents.emit(confirmation)
+            }
+        }
+    }
+
+    /**
+     * Confirms and executes a pending sensitive live tool exactly once.
+     * Preserves callId, functionName and original arguments, then sends tool response to Gemini Live.
+     */
+    suspend fun confirmLiveTool(callId: String): String? {
+        val pending = pendingConfirmationsMap.remove(callId) ?: run {
+            Log.w(tag, "confirmLiveTool: No pending confirmation found for callId: $callId (already executed or rejected)")
+            return null
+        }
+
+        if (_pendingToolConfirmation.value?.callId == callId) {
+            _pendingToolConfirmation.value = null
+        }
+
+        Log.i(tag, "Executing confirmed sensitive tool: ${pending.functionName}")
+        val result = toolExecutor?.executeTool(pending.functionName, pending.arguments)
+            ?: "تم تنفيذ الإجراء بنجاح."
+        sendToolResult(pending.callId, pending.functionName, result)
+        return result
+    }
+
+    /**
+     * Rejects a pending sensitive live tool without executing it.
+     * Sends a rejection notice back to Gemini Live so it responds naturally to the user.
+     */
+    suspend fun rejectLiveTool(callId: String): String {
+        val pending = pendingConfirmationsMap.remove(callId)
+        if (_pendingToolConfirmation.value?.callId == callId) {
+            _pendingToolConfirmation.value = null
+        }
+
+        val fnName = pending?.functionName ?: "الإجراء"
+        Log.i(tag, "User rejected sensitive tool: $fnName ($callId)")
+        val rejectionResult = "تم رفض الإجراء من قبل المستخدم (أمي). لم يتم تنفيذ أي تغيير."
+        sendToolResult(callId, fnName, rejectionResult)
+        return rejectionResult
+    }
+
+    /**
      * Sends tool execution result back to the Live Session over WebSocket.
      */
     fun sendToolResult(callId: String, functionName: String, resultString: String) {
+        lastSentToolResult = ToolResponseData(callId, functionName, resultString)
         if (isUsingFallback || webSocket == null) return
 
         val toolResponseMsg = JSONObject().apply {
@@ -474,6 +605,8 @@ class GeminiLiveService(
 
         webSocket?.close(1000, "Session ended by user")
         webSocket = null
+        pendingConfirmationsMap.clear()
+        _pendingToolConfirmation.value = null
         _sessionState.value = LiveSessionState.IDLE
         _liveTranscript.value = ""
     }

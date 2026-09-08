@@ -186,6 +186,29 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
                 android.util.Log.d("RafiqahViewModel", notice)
             }
         }
+        // Synchronize Gemini Live tool confirmations with UI
+        viewModelScope.launch {
+            geminiLiveService.pendingToolConfirmation.collect { liveConf ->
+                if (liveConf != null) {
+                    _pendingConfirmation.value = PendingActionConfirmation(
+                        title = liveConf.title,
+                        description = liveConf.description,
+                        onConfirmAction = {
+                            viewModelScope.launch {
+                                geminiLiveService.confirmLiveTool(liveConf.callId)
+                            }
+                            _pendingConfirmation.value = null
+                        },
+                        onRejectAction = {
+                            viewModelScope.launch {
+                                geminiLiveService.rejectLiveTool(liveConf.callId)
+                            }
+                            _pendingConfirmation.value = null
+                        }
+                    )
+                }
+            }
+        }
     }
 
     fun getDynamicHomeGreeting(): String {

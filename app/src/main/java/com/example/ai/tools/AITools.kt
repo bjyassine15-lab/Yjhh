@@ -274,7 +274,7 @@ object AIToolRegistry {
  * Concrete Executor for Gemini Function Calling in Rafiqah V2.1.
  * Connects function call arguments directly to Room repositories.
  */
-class ToolExecutor(
+open class ToolExecutor(
     private val profileRepo: ProfileRepository,
     private val memoryRepo: MemoryRepository,
     private val storyRepo: StoryRepository,
@@ -282,7 +282,7 @@ class ToolExecutor(
     private val frenchRepo: FrenchWordRepository
 ) {
 
-    fun isConfirmationRequired(toolName: String, args: Map<String, Any?>): Boolean {
+    open fun isConfirmationRequired(toolName: String, args: Map<String, Any?>): Boolean {
         val def = AIToolRegistry.TOOLS.find { it.name == toolName }
         if (def?.accessLevel == ToolAccessLevel.SENSITIVE_WRITE) return true
 
@@ -297,7 +297,7 @@ class ToolExecutor(
         return false
     }
 
-    fun getConfirmationMessage(toolName: String, args: Map<String, Any?>): String {
+    open fun getConfirmationMessage(toolName: String, args: Map<String, Any?>): String {
         return when (toolName) {
             "add_daily_task" -> {
                 val title = args["title"]?.toString() ?: "الموعد"
@@ -313,7 +313,7 @@ class ToolExecutor(
         }
     }
 
-    suspend fun executeTool(toolName: String, arguments: Map<String, Any?>): String {
+    open suspend fun executeTool(toolName: String, arguments: Map<String, Any?>): String {
         return try {
             when (toolName) {
                 "get_mother_profile" -> {
