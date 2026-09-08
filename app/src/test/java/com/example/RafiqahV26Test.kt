@@ -123,4 +123,62 @@ class RafiqahV26Test {
         assertEquals(LiveSessionState.ERROR, liveService.sessionState.value)
         assertTrue(liveService.liveTranscript.value.contains("الإعدادات"))
     }
+
+    @Test
+    fun `function response parsing works with text and functionCall`() {
+        val aiService = GeminiAIService()
+
+        // 1. Text response
+        val textJson = """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "parts": [
+                      { "text": "على سلامتك يا أمي الغالية 🌸" }
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+        val textResult = aiService.parseTurnResult(textJson)
+        assertEquals("على سلامتك يا أمي الغالية 🌸", textResult.replyText)
+        assertNull(textResult.functionCallName)
+        assertTrue(textResult.functionCallArgs.isEmpty())
+
+        // 2. Function call with arguments
+        val fnJson = """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "parts": [
+                      {
+                        "functionCall": {
+                          "name": "add_daily_task",
+                          "args": {
+                            "title": "موعد طبيب القلب",
+                            "timeHint": "10:30",
+                            "category": "APPOINTMENT"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+        val fnResult = aiService.parseTurnResult(fnJson)
+        assertEquals("add_daily_task", fnResult.functionCallName)
+        assertEquals("موعد طبيب القلب", fnResult.functionCallArgs["title"])
+        assertEquals("10:30", fnResult.functionCallArgs["timeHint"])
+        assertEquals("APPOINTMENT", fnResult.functionCallArgs["category"])
+
+        // 3. Malformed JSON handling without crash
+        val malformedResult = aiService.parseTurnResult("{ not a valid json }")
+        assertEquals("", malformedResult.replyText)
+        assertNull(malformedResult.functionCallName)
+    }
 }
