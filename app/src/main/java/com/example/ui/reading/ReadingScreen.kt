@@ -1,5 +1,6 @@
 package com.example.ui.reading
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,8 @@ import androidx.compose.material.icons.filled.MoreTime
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -69,6 +73,8 @@ fun ReadingScreen(
     onCompleteReading: (Long) -> Unit,
     onNavigateBack: () -> Unit,
     onSpeak: (String) -> Unit,
+    onSaveElapsedProgress: (elapsedSeconds: Int, isCompleted: Boolean) -> Unit = { _, _ -> },
+    onConceptEvaluated: (conceptKey: String, isUnderstood: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     // 10 minutes required = 600 seconds
@@ -78,6 +84,22 @@ fun ReadingScreen(
     var showExtensionDialog by remember { mutableStateOf(false) }
     var showQuiz by remember { mutableStateOf(false) }
     var quizAnswerRevealed by remember { mutableStateOf(false) }
+    var conceptEvaluationDone by remember { mutableStateOf(false) }
+
+    val handleBackPress = {
+        val elapsed = (600 - secondsLeft).coerceAtLeast(0)
+        onSaveElapsedProgress(elapsed, hasCompletedTarget)
+        onNavigateBack()
+    }
+
+    BackHandler(onBack = handleBackPress)
+
+    DisposableEffect(Unit) {
+        onDispose {
+            val elapsed = (600 - secondsLeft).coerceAtLeast(0)
+            onSaveElapsedProgress(elapsed, hasCompletedTarget)
+        }
+    }
 
     LaunchedEffect(isRunning, secondsLeft) {
         if (isRunning && secondsLeft > 0) {
@@ -101,6 +123,7 @@ fun ReadingScreen(
     val takeaway = contentItem?.keyTakeaway ?: "المشي وشرب الماء والنوم الهادئ يحافظ على صحة عضلة القلب وضغط دم متوازن."
     val question = contentItem?.quizQuestion ?: "كم مرة ينبض القلب تقريباً في اليوم؟"
     val answer = contentItem?.quizAnswer ?: "أكثر من 100 ألف مرة كل يوم."
+    val relatedConcept = contentItem?.relatedConceptKey ?: "heart"
 
     Scaffold(
         topBar = {
@@ -113,7 +136,7 @@ fun ReadingScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = handleBackPress) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                     }
                 },
@@ -162,7 +185,7 @@ fun ReadingScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = if (hasCompletedTarget) "أتممتِ الـ10 دقائق بنجاح! 🌸" else "الوقت المتبقي للجلسة",
+                                text = if (hasCompletedTarget) "أتممتِ الـ10 دقائق بنجاح! 🌸" else "الوقت المتبقي للجلسة (مطلوب 10د)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -271,7 +294,7 @@ fun ReadingScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "تحبي تمددي 5 دقايق إضافية، ولا تعملي سؤال خفيف يثبت المعلومة؟",
+                            text = "تحبي تمددي 5 دقايق إضافية اختيارية، ولا نعملو سؤال خفيف يثبت المعلومة؟",
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center
                         )
@@ -290,7 +313,7 @@ fun ReadingScreen(
                             ) {
                                 Icon(Icons.Default.MoreTime, contentDescription = null)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("+ 5 دقايق")
+                                Text("+ 5 دقايق إضافية")
                             }
                             Button(
                                 onClick = { showQuiz = !showQuiz },
@@ -305,7 +328,7 @@ fun ReadingScreen(
                 }
             }
 
-            // Quiz Section
+            // Quiz Section linked with Spaced Repetition Engine
             AnimatedVisibility(visible = showQuiz) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -339,6 +362,45 @@ fun ReadingScreen(
                                 color = SageOlive,
                                 fontWeight = FontWeight.Bold
                             )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (!conceptEvaluationDone) {
+                                Text(
+                                    text = "كيف حسيتي المفهوم هذا يا أمي؟",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            conceptEvaluationDone = true
+                                            onConceptEvaluated(relatedConcept, true)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = SageOlive)
+                                    ) {
+                                        Icon(Icons.Default.ThumbUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("فهمتو بالباهي 🌸")
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            conceptEvaluationDone = true
+                                            onConceptEvaluated(relatedConcept, false)
+                                        }
+                                    ) {
+                                        Icon(Icons.Default.ThumbDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("يحتاج مراجعة")
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "✅ تم تسجيل تقدمك في محرك المراجعة الذكية.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SageOlive
+                                )
+                            }
                         }
                     }
                 }

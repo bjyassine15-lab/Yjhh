@@ -156,10 +156,10 @@ abstract class AppDatabase : RoomDatabase() {
             )
             database.memoryDao().insertMemory(
                 MemoryEntity(
-                    category = "HEALTH_DATA",
-                    content = "تاخذ حبة دواء الضغط صباحًا بعد الفطور، ونومها متقطع في بعض الليالي.",
-                    importance = 5,
-                    source = "ملاحظة صحية دورية"
+                    category = "WELLNESS",
+                    content = "تحرص على شرب الماء والتغذية المنزلية المتوازنة والمشي اليومي.",
+                    importance = 3,
+                    source = "نمط الحياة اليومي"
                 )
             )
             database.memoryDao().insertMemory(
@@ -234,11 +234,11 @@ abstract class AppDatabase : RoomDatabase() {
             // Seed daily tasks
             val tasks = listOf(
                 DailyTaskEntity(
-                    title = "دواء الضغط مع فطور الصباح",
-                    category = "MEDICINE",
+                    title = "شرب كأس ماء دافئ مع فطور الصباح",
+                    category = "HEALTH_HABIT",
                     timeHint = "08:30 صباحًا",
                     isCompleted = false,
-                    note = "حبة واحدة بعد شرب كأس ماء وفطور هادئ",
+                    note = "بدء اليوم بماء دافئ وفطور هادئ ومتوازن",
                     isPriority = true
                 ),
                 DailyTaskEntity(
@@ -337,14 +337,14 @@ abstract class AppDatabase : RoomDatabase() {
                     HealthProfileEntity(
                         id = 1,
                         age = 53,
-                        sleepQuality = "نوم متقطع أحيانًا",
+                        sleepQuality = "طبيعي ومريح",
                         sleepTimeHint = "23:00",
                         wakeTimeHint = "07:00",
-                        activityLevel = "مشي خفيف ونشاط منزلي",
+                        activityLevel = "نشاط يومي معتدل ومشي خفيف",
                         waterIntakeGoalGlasses = 6,
                         currentWaterGlasses = 3,
-                        dietaryHabits = "أكل منزلي تونسي معتدل وقليل الملح",
-                        generalGoals = "المشي 20 دقيقة وشرب الماء بانتظام"
+                        dietaryHabits = "أكل منزلي متوازن وصحي",
+                        generalGoals = "الحفاظ على النشاط وشرب الماء بانتظام"
                     )
                 )
                 database.healthDao().insertHabit(

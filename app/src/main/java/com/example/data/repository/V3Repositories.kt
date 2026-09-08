@@ -70,10 +70,35 @@ class ContentRepository(private val contentDao: ContentDao) {
         )
     }
     suspend fun updateReadingSession(session: ReadingSessionEntity) = contentDao.updateReadingSession(session)
+
+    suspend fun recordReadingProgress(contentId: String, elapsedSeconds: Int, isCompleted: Boolean) {
+        val session = contentDao.getLatestReadingSession()
+        if (session != null && session.contentId == contentId) {
+            val updated = session.copy(
+                elapsedSeconds = elapsedSeconds,
+                isCompleted = isCompleted,
+                completedAt = if (isCompleted) System.currentTimeMillis() else null
+            )
+            contentDao.updateReadingSession(updated)
+        } else {
+            contentDao.insertReadingSession(
+                ReadingSessionEntity(
+                    contentId = contentId,
+                    contentTitle = "قراءة هادئة",
+                    elapsedSeconds = elapsedSeconds,
+                    isCompleted = isCompleted,
+                    completedAt = if (isCompleted) System.currentTimeMillis() else null
+                )
+            )
+        }
+    }
 }
 
 class FocusRepository(private val focusDao: FocusDao) {
     fun getAllSessionsFlow(): Flow<List<FocusSessionEntity>> = focusDao.getAllFocusSessionsFlow()
+    fun getActiveFocusSessionFlow(): Flow<FocusSessionEntity?> = focusDao.getActiveFocusSessionFlow()
+    suspend fun getActiveFocusSession(): FocusSessionEntity? = focusDao.getActiveFocusSession()
+
     suspend fun startFocusSession(targetMinutes: Int, activityTitle: String, level: Int): Long {
         return focusDao.insertFocusSession(
             FocusSessionEntity(
@@ -83,6 +108,17 @@ class FocusRepository(private val focusDao: FocusDao) {
                 startedAt = System.currentTimeMillis()
             )
         )
+    }
+    suspend fun completeFocusSession(id: Long, actualSecs: Int) {
+        val session = focusDao.getActiveFocusSession()
+        if (session != null && (id == 0L || session.id == id)) {
+            val updated = session.copy(
+                completedSuccessfully = true,
+                actualElapsedSeconds = actualSecs,
+                endedAt = System.currentTimeMillis()
+            )
+            focusDao.updateFocusSession(updated)
+        }
     }
     suspend fun updateFocusSession(session: FocusSessionEntity) = focusDao.updateFocusSession(session)
 
@@ -95,13 +131,22 @@ class FocusRepository(private val focusDao: FocusDao) {
 class ReminderRepository(private val reminderDao: ReminderDao) {
     fun getAllActiveRemindersFlow(): Flow<List<ReminderEntity>> = reminderDao.getAllActiveRemindersFlow()
     suspend fun getUpcomingReminders(fromTime: Long = System.currentTimeMillis()): List<ReminderEntity> = reminderDao.getUpcomingReminders(fromTime)
-    suspend fun addReminder(title: String, triggerMillis: Long, timeHint: String, category: String = "GENERAL"): Long {
+    suspend fun addReminder(
+        title: String,
+        triggerMillis: Long,
+        timeHint: String,
+        category: String = "GENERAL",
+        isRecurring: Boolean = false,
+        recurrenceRule: String? = null
+    ): Long {
         return reminderDao.insertReminder(
             ReminderEntity(
                 title = title,
                 triggerTimeMillis = triggerMillis,
                 timeHint = timeHint,
-                category = category
+                category = category,
+                isRecurring = isRecurring,
+                recurrenceRule = recurrenceRule
             )
         )
     }

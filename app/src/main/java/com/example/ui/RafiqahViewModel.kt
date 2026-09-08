@@ -121,6 +121,10 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         focusRepo = focusRepo
     )
 
+    val appBlockingController = com.example.service.focus.AppBlockingController(application, focusRepo)
+    val frenchLessonGenerator = com.example.ai.learning.FrenchLessonGenerator(frenchRepo)
+    val appBlockingStatus = appBlockingController.status
+
     val voiceService = VoiceService(application)
     val geminiLiveService = GeminiLiveService(
         context = application,
@@ -460,13 +464,32 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun addNaturalReminder(title: String, timeExpression: String, category: String = "GENERAL") {
+    fun addNaturalReminder(
+        title: String,
+        timeExpression: String,
+        category: String = "GENERAL",
+        isRecurring: Boolean = false,
+        onFeedback: ((String) -> Unit)? = null
+    ) {
         viewModelScope.launch {
+            if (timeExpression.isBlank()) {
+                onFeedback?.invoke("وقتاش تحبي نذكرك يا أمي؟ الصباح وإلا في الليل؟")
+                return@launch
+            }
             val parsed = com.example.ai.datetime.NaturalDateTimeParser.parse(timeExpression)
-            val trigger = parsed?.timeMillis ?: (System.currentTimeMillis() + 3600_000L)
-            val hint = parsed?.formattedHint ?: timeExpression
-            val id = reminderRepo.addReminder(title, trigger, hint, category)
-            reminderScheduler.scheduleReminder(id, title, trigger, category)
+            if (parsed == null) {
+                onFeedback?.invoke("سامحني يا أمي، ما فهمتش بالباهي وقتاش تحبي نذكّرك. الصباح وإلا في الليل؟")
+                return@launch
+            }
+            if (parsed.isAmbiguous) {
+                onFeedback?.invoke(parsed.disambiguationQuestion ?: "يا أمي، تقصدي الوقت هذا الصباح ولا في الليل؟")
+                return@launch
+            }
+            val trigger = parsed.timeMillis
+            val hint = parsed.formattedHint
+            val id = reminderRepo.addReminder(title, trigger, hint, category, isRecurring)
+            val res = reminderScheduler.scheduleReminder(id, title, trigger, category, isRecurring = isRecurring)
+            onFeedback?.invoke("تمت جدولة التذكير بنجاح: \"$title\" ($hint). ${res.feedbackMessage}")
         }
     }
 
@@ -480,12 +503,58 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     fun startFocusSession(minutes: Int, activityTitle: String) {
         viewModelScope.launch {
             focusRepo.startFocusSession(minutes, activityTitle, 1)
+            appBlockingController.activateFocusBlocking()
+        }
+    }
+
+    fun endFocusSession() {
+        viewModelScope.launch {
+            appBlockingController.deactivateFocusBlocking()
+            val active = focusRepo.getActiveFocusSession()
+            if (active != null) {
+                focusRepo.completeFocusSession(active.id, active.targetDurationMinutes * 60)
+            }
         }
     }
 
     fun toggleAppBlock(packageName: String, blocked: Boolean) {
         viewModelScope.launch {
             focusRepo.setAppBlocked(packageName, blocked)
+            appBlockingController.refreshStatus()
+        }
+    }
+
+    fun saveReadingProgress(contentId: String, elapsedSeconds: Int, isCompleted: Boolean) {
+        viewModelScope.launch {
+            contentRepo.recordReadingProgress(contentId, elapsedSeconds, isCompleted)
+            if (isCompleted) {
+                routineRepo.getActiveMicroSessions().find { it.contentId == contentId }?.let {
+                    routineRepo.markCompleted(it.id)
+                }
+            }
+        }
+    }
+
+    fun evaluateConceptFromReading(conceptKey: String, isUnderstood: Boolean) {
+        viewModelScope.launch {
+            if (isUnderstood) {
+                spacedRepetitionEngine.onUserUnderstood(conceptKey)
+            } else {
+                spacedRepetitionEngine.onUserConfused(conceptKey)
+            }
+            val statusText = if (isUnderstood) "أتقنت أمي مفهوم" else "يحتاج مفهوم"
+            memoryRepo.saveMemoryWithDeduplication(
+                content = "$statusText $conceptKey ${if (isUnderstood) "بنجاح" else "مراجعة إضافية"}.",
+                category = MemoryCategory.LEARNING,
+                importance = 4,
+                source = "جلسة القراءة والمراجعة"
+            )
+        }
+    }
+
+    fun rescheduleRoutineSession(sessionId: String, newTimeHint: String) {
+        viewModelScope.launch {
+            dailyRoutineEngine.rescheduleMissedActivity(sessionId, newTimeHint)
         }
     }
 

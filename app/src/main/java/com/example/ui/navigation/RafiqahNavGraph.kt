@@ -38,6 +38,7 @@ object RafiqahDestinations {
 fun RafiqahNavGraph(
     viewModel: RafiqahViewModel,
     modifier: Modifier = Modifier,
+    startDestination: String = RafiqahDestinations.HOME,
     navController: NavHostController = rememberNavController()
 ) {
     val profile by viewModel.profile.collectAsState()
@@ -57,7 +58,7 @@ fun RafiqahNavGraph(
 
     NavHost(
         navController = navController,
-        startDestination = RafiqahDestinations.HOME,
+        startDestination = startDestination,
         modifier = modifier
     ) {
         composable(RafiqahDestinations.HOME) {
@@ -111,11 +112,23 @@ fun RafiqahNavGraph(
         }
 
         composable(RafiqahDestinations.FOCUS_SESSION) {
+            val activeFocusSession by viewModel.focusRepo.activeSession.collectAsState(initial = null)
+            val blockingStatus by viewModel.appBlockingStatus.collectAsState()
+            val targetMinutes = activeFocusSession?.targetDurationMinutes ?: 15
+            val actTitle = activeFocusSession?.activityTitle ?: "جلسة تركيز وقراءة هادئة"
+
             FocusSessionScreen(
-                onNavigateBack = { navController.popBackStack() },
+                targetDurationMinutes = targetMinutes,
+                activityTitle = actTitle,
+                blockingStatusMessage = blockingStatus,
+                onNavigateBack = {
+                    viewModel.endFocusSession()
+                    navController.popBackStack()
+                },
                 onSpeak = { viewModel.speakText(it) },
                 onSessionFinished = {
-                    viewModel.saveLearningProgress("جلسة تركيز 7 دقايق في الخلية", true)
+                    viewModel.endFocusSession()
+                    viewModel.saveLearningProgress("جلسة تركيز: $actTitle", true)
                 }
             )
         }
@@ -126,8 +139,17 @@ fun RafiqahNavGraph(
             com.example.ui.reading.ReadingScreen(
                 contentItem = firstItem,
                 onCompleteReading = { secs ->
-                    viewModel.saveLearningProgress("قراءة 10 دقائق: ${firstItem?.title ?: "الصحة"}", true)
-                    viewModel.completeMicroSession("session_reading_1")
+                    firstItem?.let { item ->
+                        viewModel.saveReadingProgress(item.id, secs.toInt(), true)
+                    }
+                },
+                onSaveElapsedProgress = { elapsed, completed ->
+                    firstItem?.let { item ->
+                        viewModel.saveReadingProgress(item.id, elapsed, completed)
+                    }
+                },
+                onConceptEvaluated = { conceptKey, isUnderstood ->
+                    viewModel.evaluateConceptFromReading(conceptKey, isUnderstood)
                 },
                 onNavigateBack = { navController.popBackStack() },
                 onSpeak = { viewModel.speakText(it) }

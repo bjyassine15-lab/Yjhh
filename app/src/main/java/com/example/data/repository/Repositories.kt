@@ -308,6 +308,10 @@ class FrenchWordRepository(private val frenchWordDao: FrenchWordDao) {
         frenchWordDao.setMastered(id, mastered)
     }
 
+    suspend fun insertWord(entity: FrenchWordEntity) {
+        frenchWordDao.insertWord(entity)
+    }
+
     private fun FrenchWordEntity.toDomain(): FrenchWordItem {
         return FrenchWordItem(
             id = id,

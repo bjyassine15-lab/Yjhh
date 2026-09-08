@@ -31,7 +31,17 @@ class MainActivity : ComponentActivity() {
             color = MaterialTheme.colorScheme.background
           ) {
             val viewModel: RafiqahViewModel = viewModel()
-            RafiqahNavGraph(viewModel = viewModel)
+            val rawDestination = intent?.getStringExtra("com.example.reminder.EXTRA_DESTINATION")
+            val startDest = when (rawDestination) {
+              "reading" -> com.example.ui.navigation.RafiqahDestinations.READING
+              "learning" -> com.example.ui.navigation.RafiqahDestinations.LEARNING
+              "focus" -> com.example.ui.navigation.RafiqahDestinations.FOCUS_SESSION
+              "health" -> com.example.ui.navigation.RafiqahDestinations.HEALTH
+              "planner" -> com.example.ui.navigation.RafiqahDestinations.PLANNER
+              "french" -> com.example.ui.navigation.RafiqahDestinations.FRENCH
+              else -> com.example.ui.navigation.RafiqahDestinations.HOME
+            }
+            RafiqahNavGraph(viewModel = viewModel, startDestination = startDest)
           }
         }
       }

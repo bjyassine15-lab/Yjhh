@@ -84,6 +84,11 @@ class SpacedRepetitionEngine(private val repository: LearningProgressRepository)
         return getConceptState(conceptKey)
     }
 
+    suspend fun getDueReviews(): List<String> {
+        val all = repository.getAllProgressList()
+        return all.filter { it.needsReview }.map { it.conceptKey }
+    }
+
     fun calculateNextReviewIntervalHours(state: KnowledgeState, successes: Int): Long {
         return when (state) {
             KnowledgeState.NEEDS_REVIEW -> 4L // Review soon (within 4 hours)

@@ -108,6 +108,9 @@ interface FrenchWordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWords(words: List<FrenchWordEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertWord(word: FrenchWordEntity)
+
     @Query("UPDATE french_words SET isMastered = :isMastered WHERE id = :id")
     suspend fun setMastered(id: Int, isMastered: Boolean)
 }

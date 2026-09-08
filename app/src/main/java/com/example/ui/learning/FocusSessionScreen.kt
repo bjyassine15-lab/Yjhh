@@ -1,6 +1,6 @@
 package com.example.ui.learning
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,9 +20,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -45,6 +48,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.GoldAccent
@@ -58,10 +62,13 @@ fun FocusSessionScreen(
     onNavigateBack: () -> Unit,
     onSpeak: (String) -> Unit,
     onSessionFinished: () -> Unit,
+    targetDurationMinutes: Int = 15,
+    activityTitle: String = "جلسة تركيز وقراءة هادئة",
+    blockingStatusMessage: String? = null,
     modifier: Modifier = Modifier
 ) {
-    // 7 minutes = 420 seconds default
-    var secondsLeft by remember { mutableIntStateOf(420) }
+    val totalSeconds = (targetDurationMinutes.coerceAtLeast(1) * 60).toFloat()
+    var secondsLeft by remember(targetDurationMinutes) { mutableIntStateOf(totalSeconds.toInt()) }
     var isRunning by remember { mutableStateOf(true) }
     var currentStep by remember { mutableIntStateOf(1) } // 1: Story, 2: Visual, 3: Recap
 
@@ -69,13 +76,15 @@ fun FocusSessionScreen(
         if (isRunning && secondsLeft > 0) {
             delay(1000L)
             secondsLeft--
+            if (secondsLeft == 0) {
+                onSessionFinished()
+            }
         }
     }
 
     val minutes = secondsLeft / 60
     val seconds = secondsLeft % 60
     val timeFormatted = String.format("%02d:%02d", minutes, seconds)
-    val totalSeconds = 420f
     val progress = (totalSeconds - secondsLeft) / totalSeconds
 
     Scaffold(
@@ -114,17 +123,51 @@ fun FocusSessionScreen(
             // Calm Header
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "7 دقايق هادية ومفيدة ليك يا أمي 🌷",
+                    text = "$targetDurationMinutes دقيقة هادية ومفيدة ليك يا أمي 🌷",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = RafiqahRose
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
+                    text = activityTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
                     text = "خالينا نركزوا على فكرة واحدة بكل هدوء وراحة بال.",
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            // Real App Blocking Policy Status Card
+            if (!blockingStatusMessage.isNullOrBlank()) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SageOlive.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "حماية التركيز",
+                            tint = SageOlive,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = blockingStatusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
             }
 
             // Circular Timer
@@ -172,8 +215,8 @@ fun FocusSessionScreen(
                     ) {
                         Text(
                             text = when (currentStep) {
-                                1 -> "الخطوة 1: نسمعو حكاية سارة والخلية 📖"
-                                2 -> "الخطوة 2: نتأملو في النواة والميتوكوندريا 🔬"
+                                1 -> "الخطوة 1: استماع وتأمل هادئ 📖"
+                                2 -> "الخطوة 2: استيعاب الفكرة الطيبة 🔬"
                                 else -> "الخطوة 3: تثبيت المعنى في البال 🌷"
                             },
                             style = MaterialTheme.typography.titleMedium,
@@ -182,9 +225,9 @@ fun FocusSessionScreen(
                         )
                         IconButton(onClick = {
                             val textToSay = when (currentStep) {
-                                1 -> "سارة كانت تسأل: شنوّة أصغر حاجة حية في جسمنا؟ واكتشفت إنها الخلية."
-                                2 -> "الخلية فيها النواة اللي فيها أسرار الـ DNA، ومحطة الطاقة الميتوكوندريا."
-                                else -> "يعطيك الصحة يا أمي، كملنا جلسة اليوم وكل معلومة دخلت في بالك ربي يبارك فيها."
+                                1 -> "استمعي بهدوء لصوت رفيقة، كل دقيقة تركيز تعطي صحة وعافية لذهنك."
+                                2 -> "المعلومة الهادية تدخل للبال وتستقر بلا تعب ولا ضغط."
+                                else -> "يعطيك الصحة يا أمي، كملنا جلسة اليوم وكل معلومة ربي يبارك فيها."
                             }
                             onSpeak(textToSay)
                         }) {
@@ -200,9 +243,9 @@ fun FocusSessionScreen(
 
                     Text(
                         text = when (currentStep) {
-                            1 -> "استمعي بهدوء لصوت رفيقة يرويلك كيفاش الخلية تبني جسمنا."
-                            2 -> "شوفي كيفاش ربي خلق محطة طاقة نظيفة في كل خلية تعطينا النشاط والحيوية."
-                            else -> "ما شاء الله، هاك كسبتي معلومة طبية قيمة في وقت ممتع وبلا تعب!"
+                            1 -> "استمعي بهدوء لصوت رفيقة يرويلك كيفاش المعرفة تبني حكمة وصحة."
+                            2 -> "شوفي كيفاش ربي خلق التوازن في كل شيء في جسمنا وحياتنا."
+                            else -> "ما شاء الله، هاك كسبتي دقائق قيمة في وقت ممتع وبلا تعب!"
                         },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface

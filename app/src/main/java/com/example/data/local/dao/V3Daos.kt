@@ -81,6 +81,9 @@ interface ContentDao {
     @Query("SELECT * FROM reading_sessions ORDER BY id DESC LIMIT 1")
     fun getLatestReadingSessionFlow(): Flow<ReadingSessionEntity?>
 
+    @Query("SELECT * FROM reading_sessions ORDER BY id DESC LIMIT 1")
+    suspend fun getLatestReadingSession(): ReadingSessionEntity?
+
     @Insert
     suspend fun insertReadingSession(session: ReadingSessionEntity): Long
 
@@ -92,6 +95,12 @@ interface ContentDao {
 interface FocusDao {
     @Query("SELECT * FROM focus_sessions ORDER BY id DESC")
     fun getAllFocusSessionsFlow(): Flow<List<FocusSessionEntity>>
+
+    @Query("SELECT * FROM focus_sessions WHERE completedSuccessfully = 0 ORDER BY id DESC LIMIT 1")
+    suspend fun getActiveFocusSession(): FocusSessionEntity?
+
+    @Query("SELECT * FROM focus_sessions WHERE completedSuccessfully = 0 ORDER BY id DESC LIMIT 1")
+    fun getActiveFocusSessionFlow(): Flow<FocusSessionEntity?>
 
     @Insert
     suspend fun insertFocusSession(session: FocusSessionEntity): Long

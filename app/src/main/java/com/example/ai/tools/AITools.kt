@@ -419,27 +419,60 @@ open class ToolExecutor(
                 }
 
                 "get_health_profile" -> {
-                    val p = profileRepo.getProfile()
-                    val facts = mutableListOf<String>()
-                    if (p.health.diagnosedConditions.isNotEmpty()) facts.add("الحالات المشخصة: ${p.health.diagnosedConditions.joinToString("، ")}")
-                    if (p.health.medications.isNotEmpty()) facts.add("الأدوية: ${p.health.medications.joinToString("، ")}")
-                    if (p.health.sleepQuality.isNotBlank()) facts.add("جودة النوم: ${p.health.sleepQuality}")
-                    if (p.health.weightKg > 0) facts.add("الوزن: ${p.health.weightKg} كغ")
-                    if (facts.isEmpty()) "لا توجد معلومات صحية مسجلة." else facts.joinToString(" | ")
+                    val hp = healthRepo?.getHealthProfile()
+                    if (hp != null) {
+                        val facts = mutableListOf<String>()
+                        facts.add("العمر: ${hp.age} سنة")
+                        facts.add("جودة النوم: ${hp.sleepQuality} (النوم: ${hp.sleepTimeHint}، الاستيقاظ: ${hp.wakeTimeHint})")
+                        facts.add("مستوى النشاط: ${hp.activityLevel}")
+                        facts.add("الماء اليوم: ${hp.currentWaterGlasses}/${hp.waterIntakeGoalGlasses} كؤوس")
+                        facts.add("العادات الغذائية: ${hp.dietaryHabits}")
+                        facts.add("الأهداف العامة: ${hp.generalGoals}")
+                        facts.joinToString(" | ")
+                    } else {
+                        val p = profileRepo.getProfile()
+                        "العمر: ${p.identity.age} سنة | النوم: ${p.health.sleepQuality} | النشاط: ${p.health.dailyActivity}"
+                    }
                 }
 
                 "get_health_notes" -> {
-                    val mems = memoryRepo.getAllMemoriesList().filter {
-                        it.category == MemoryCategory.HEALTH || it.category == MemoryCategory.HEALTH_DATA
+                    val obs = healthRepo?.getRecentObservations(10) ?: emptyList()
+                    if (obs.isNotEmpty()) {
+                        obs.joinToString("\n") { "- [${it.category}] ${it.observationText}" }
+                    } else {
+                        val mems = memoryRepo.getAllMemoriesList().filter {
+                            it.category == MemoryCategory.HEALTH || it.category == MemoryCategory.HEALTH_DATA
+                        }
+                        if (mems.isEmpty()) "لا توجد ملاحظات صحية سابقة مسجلة."
+                        else mems.joinToString("\n") { "- ${it.content}" }
                     }
-                    if (mems.isEmpty()) "لا توجد ملاحظات صحية سابقة مسجلة."
-                    else mems.joinToString("\n") { "- ${it.content}" }
                 }
 
                 "save_health_note" -> {
                     val note = arguments["note"]?.toString() ?: return "خطأ: نص الملاحظة فارغ"
-                    val id = memoryRepo.saveMemoryWithDeduplication(note, MemoryCategory.HEALTH, 4, "ملاحظة صحية أبلغت عنها أمي")
-                    "تم تسجيل الملاحظة الصحية بنجاح (معرف: $id)"
+                    val cat = arguments["category"]?.toString() ?: "WELLNESS"
+                    val obsId = healthRepo?.addObservation(note, cat) ?: 0L
+                    memoryRepo.saveMemoryWithDeduplication(note, MemoryCategory.HEALTH, 4, "ملاحظة صحية من المحادثة")
+
+                    // Reflection on habit if user expressed desire for activity or sleep adjustments
+                    if (note.contains("نتحرك") || note.contains("مشي") || note.contains("حركة")) {
+                        healthRepo?.addHabit("مشي خفيف 15 دقيقة بعد العصر", "17:00")
+                        plannerRepo.addTask(
+                            com.example.data.local.model.DailyTask(
+                                id = 0,
+                                title = "مشي خفيف 15 دقيقة واستنشاق هواء نقي",
+                                category = com.example.data.local.model.TaskCategory.HEALTH_HABIT,
+                                timeHint = "17:00 العشية",
+                                isCompleted = false,
+                                note = "خطوة طيبة لتنشيط البدن والدورة الدموية",
+                                isPriority = true
+                            )
+                        )
+                    } else if (note.contains("نرقد") || note.contains("نوم") || note.contains("متأخر")) {
+                        healthRepo?.addHabit("تهيئة النوم وقراءة هادئة", "22:30")
+                    }
+
+                    "تم تسجيل الملاحظة الصحية بنجاح في السجل الصحي (معرف: $obsId) وتحديث البرنامج اليومي."
                 }
 
                 "get_learning_progress" -> {
@@ -547,17 +580,49 @@ open class ToolExecutor(
 
                 "create_reminder" -> {
                     val title = arguments["title"]?.toString() ?: return "خطأ: عنوان التذكير فارغ"
-                    val expr = arguments["timeExpression"]?.toString() ?: "غدوة الصباح"
+                    val expr = arguments["timeExpression"]?.toString() ?: ""
                     val cat = arguments["category"]?.toString() ?: "GENERAL"
-                    val parsed = com.example.ai.datetime.NaturalDateTimeParser.parse(expr)
-                    val triggerMillis = parsed?.timeMillis ?: (System.currentTimeMillis() + 3600_000L)
-                    val timeHint = parsed?.formattedHint ?: expr
+                    val isRecur = (arguments["isRecurring"] as? Boolean) ?: false
+                    val recurRule = arguments["recurrenceRule"]?.toString() ?: "DAILY"
 
-                    val id = reminderRepo?.addReminder(title, triggerMillis, timeHint, cat) ?: 0L
-                    if (id > 0 && reminderScheduler != null) {
-                        reminderScheduler.scheduleReminder(id, title, triggerMillis, cat)
+                    if (expr.isBlank()) {
+                        return "وقتاش تحبي نذكرك يا أمي؟ الصباح ولا في الليل؟"
                     }
-                    "تمت جدولة التذكير بنجاح: \"$title\" في الوقت المحدد ($timeHint)."
+
+                    val parsed = com.example.ai.datetime.NaturalDateTimeParser.parse(expr)
+                    if (parsed == null) {
+                        return "سامحني يا أمي، ما فهمتش بالباهي الوقت اللي تحبي نذكرك فيه. تحبي نذكّرك الصباح وإلا في الليل؟"
+                    }
+                    if (parsed.isAmbiguous) {
+                        return parsed.disambiguationQuestion ?: "يا أمي، تقصدي الوقت هذا الصباح ولا في الليل؟"
+                    }
+
+                    val triggerMillis = parsed.timeMillis
+                    val timeHint = parsed.formattedHint
+
+                    val id = reminderRepo?.addReminder(
+                        title = title,
+                        triggerMillis = triggerMillis,
+                        timeHint = timeHint,
+                        category = cat,
+                        isRecurring = isRecur,
+                        recurrenceRule = if (isRecur) recurRule else null
+                    ) ?: 0L
+
+                    val feedbackMsg = if (id > 0 && reminderScheduler != null) {
+                        val res = reminderScheduler.scheduleReminder(
+                            id = id,
+                            title = title,
+                            triggerMillis = triggerMillis,
+                            category = cat,
+                            isRecurring = isRecur,
+                            recurrenceRule = if (isRecur) recurRule else null
+                        )
+                        res.feedbackMessage
+                    } else {
+                        "تمت إضافة التذكير."
+                    }
+                    "تمت جدولة التذكير بنجاح: \"$title\" في الوقت المحدد ($timeHint). $feedbackMsg"
                 }
 
                 "get_active_reminders" -> {
@@ -599,7 +664,20 @@ open class ToolExecutor(
                         )
                     )
                     profileRepo.updateProfile(updated)
-                    "تم تحديث بيانات الملف الشخصي بنجاح."
+
+                    // Also sync with health profile V3
+                    val hp = healthRepo?.getHealthProfile()
+                    if (hp != null) {
+                        healthRepo.updateHealthProfile(
+                            hp.copy(
+                                age = newAge,
+                                activityLevel = newAct,
+                                sleepQuality = newSleep
+                            )
+                        )
+                    }
+
+                    "تم تحديث بيانات الملف الشخصي والصحي بنجاح."
                 }
 
                 else -> "أداة غير معروفة: $toolName"

@@ -66,12 +66,15 @@ class DailyRoutineEngine(
             )
         )
 
-        // 3. Learning review or quick concept recall (3-5 mins)
-        val cellConcept = spacedRepetition.getConceptState("cell")
-        val reviewTitle = if (cellConcept.state == KnowledgeState.NEEDS_REVIEW) {
-            "مراجعة مبسطة: الخلية والغشاء الذكي"
-        } else {
-            "تمرين ذهني خفيف: استرجاع معلومات الخلية"
+        // 3. Learning review or quick concept recall based on real due reviews
+        val dueConcepts = spacedRepetition.getDueReviews()
+        val targetConcept = dueConcepts.firstOrNull() ?: "cell"
+        val conceptState = spacedRepetition.getConceptState(targetConcept)
+        val reviewTitle = when (conceptState.state) {
+            KnowledgeState.NEEDS_REVIEW -> "مراجعة خفيفة وتثبيت: ${conceptState.title}"
+            KnowledgeState.LEARNING, KnowledgeState.PARTIALLY_UNDERSTOOD -> "استرجاع سريع: ${conceptState.title}"
+            KnowledgeState.MASTERED -> "تمرين ذهني خفيف: استرجاع معلومات ${conceptState.title}"
+            else -> "اكتشاف مفهوم علمي جديد: ${conceptState.title}"
         }
         sessions.add(
             MicroSessionEntity(
@@ -82,7 +85,7 @@ class DailyRoutineEngine(
                 scheduledAtTimeHint = "18:00",
                 isRequired = false,
                 priority = 3,
-                relatedConceptKey = "cell"
+                relatedConceptKey = targetConcept
             )
         )
 
@@ -134,7 +137,15 @@ class DailyRoutineEngine(
     }
 
     suspend fun rescheduleMissedActivity(sessionId: String, newTimeHint: String): Boolean {
-        routineRepo.markSkipped(sessionId)
-        return true
+        val session = routineRepo.getActiveMicroSessions().find { it.id == sessionId }
+        if (session != null) {
+            val rescheduled = session.copy(
+                scheduledAtTimeHint = newTimeHint,
+                isCompleted = false
+            )
+            routineRepo.saveSessions(listOf(rescheduled))
+            return true
+        }
+        return false
     }
 }
