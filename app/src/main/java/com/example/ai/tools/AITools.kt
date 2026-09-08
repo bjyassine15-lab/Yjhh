@@ -244,6 +244,67 @@ object AIToolRegistry {
                 })
                 put("required", JSONArray().apply { put("wordId") })
             }
+        ),
+        ToolDefinition(
+            name = "create_reminder",
+            description = "إنشاء تذكير حقيقي بالصوت مع وقت وتنبيه خارج التطبيق (المواعيد الحساسة تؤكد مسبقاً)",
+            accessLevel = ToolAccessLevel.SAFE_WRITE,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("title", buildParam("STRING", "نص التذكير، مثلا: شرب الماء، موعد الطبيب، قراءة"))
+                    put("timeExpression", buildParam("STRING", "التعبير الزمني، مثلا: غدوة على الثمانية، بعد ساعتين"))
+                    put("category", buildParam("STRING", "التصنيف: MEDICINE, APPOINTMENT, WATER, READING, GENERAL"))
+                })
+                put("required", JSONArray().apply { put("title"); put("timeExpression") })
+            }
+        ),
+        ToolDefinition(
+            name = "get_active_reminders",
+            description = "قراءة التذكيرات والمواعيد النشطة المسجلة في النظام",
+            accessLevel = ToolAccessLevel.READ_TOOL,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            }
+        ),
+        ToolDefinition(
+            name = "start_reading_session",
+            description = "بدء جلسة قراءة يومية مطلوبة أو اختيارية بمؤقت 10 دقائق ومحتوى تعليمي",
+            accessLevel = ToolAccessLevel.SAFE_WRITE,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("contentId", buildParam("STRING", "معرف المحتوى، مثلا: content_heart_health, content_cell_membrane"))
+                    put("durationMinutes", buildParam("INTEGER", "المدة المطلوبة بالدقائق (افتراضي 10)"))
+                })
+            }
+        ),
+        ToolDefinition(
+            name = "start_focus_session",
+            description = "بدء جلسة تركيز هادئة مع عد تنازلي وتتبع التطبيقات المشتتة",
+            accessLevel = ToolAccessLevel.SAFE_WRITE,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("durationMinutes", buildParam("INTEGER", "مدة التركيز بالدقائق (مثلا 15 دقيقة)"))
+                    put("activityTitle", buildParam("STRING", "اسم نشاط التركيز"))
+                })
+                put("required", JSONArray().apply { put("durationMinutes") })
+            }
+        ),
+        ToolDefinition(
+            name = "update_profile_from_conversation",
+            description = "تحديث بيانات الملف الشخصي التي صرحت بها أمي طبيعياً (العمر، المدينة، نمط الحياة)",
+            accessLevel = ToolAccessLevel.SAFE_WRITE,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("age", buildParam("INTEGER", "العمر إذا ذكرته أمي"))
+                    put("dailyActivity", buildParam("STRING", "النشاط اليومي أو العادات"))
+                    put("sleepQuality", buildParam("STRING", "طبيعة النوم وأوقاته"))
+                })
+            }
         )
     )
 
@@ -279,18 +340,23 @@ open class ToolExecutor(
     private val memoryRepo: MemoryRepository,
     private val storyRepo: StoryRepository,
     private val plannerRepo: DailyPlannerRepository,
-    private val frenchRepo: FrenchWordRepository
+    private val frenchRepo: FrenchWordRepository,
+    private val healthRepo: com.example.data.repository.HealthRepository? = null,
+    private val reminderRepo: com.example.data.repository.ReminderRepository? = null,
+    private val reminderScheduler: com.example.service.reminder.ReminderScheduler? = null,
+    private val contentRepo: com.example.data.repository.ContentRepository? = null,
+    private val focusRepo: com.example.data.repository.FocusRepository? = null
 ) {
 
     open fun isConfirmationRequired(toolName: String, args: Map<String, Any?>): Boolean {
         val def = AIToolRegistry.TOOLS.find { it.name == toolName }
         if (def?.accessLevel == ToolAccessLevel.SENSITIVE_WRITE) return true
 
-        // Extra check for appointment in add_daily_task
-        if (toolName == "add_daily_task") {
+        // Extra check for appointment in add_daily_task or create_reminder
+        if (toolName == "add_daily_task" || toolName == "create_reminder") {
             val title = args["title"]?.toString()?.lowercase() ?: ""
             val cat = args["category"]?.toString() ?: ""
-            if (cat == "APPOINTMENT" || title.contains("طبيب") || title.contains("موعد") || title.contains("سبيطار")) {
+            if (cat == "APPOINTMENT" || cat == "MEDICINE" || title.contains("طبيب") || title.contains("موعد") || title.contains("سبيطار") || title.contains("دواء")) {
                 return true
             }
         }
@@ -299,6 +365,11 @@ open class ToolExecutor(
 
     open fun getConfirmationMessage(toolName: String, args: Map<String, Any?>): String {
         return when (toolName) {
+            "create_reminder" -> {
+                val title = args["title"]?.toString() ?: "الموعد"
+                val time = args["timeExpression"]?.toString() ?: ""
+                "تحبي نبرمجلك منبه وتذكير رسمي لـ \"$title\" ($time) يا أمي؟"
+            }
             "add_daily_task" -> {
                 val title = args["title"]?.toString() ?: "الموعد"
                 val time = args["timeHint"]?.toString() ?: ""
@@ -472,6 +543,63 @@ open class ToolExecutor(
                     val isMastered = arguments["isMastered"] as? Boolean ?: true
                     frenchRepo.setWordMastered(wordId, isMastered)
                     "تم تحديث حالة الكلمة الفرنسية بنجاح."
+                }
+
+                "create_reminder" -> {
+                    val title = arguments["title"]?.toString() ?: return "خطأ: عنوان التذكير فارغ"
+                    val expr = arguments["timeExpression"]?.toString() ?: "غدوة الصباح"
+                    val cat = arguments["category"]?.toString() ?: "GENERAL"
+                    val parsed = com.example.ai.datetime.NaturalDateTimeParser.parse(expr)
+                    val triggerMillis = parsed?.timeMillis ?: (System.currentTimeMillis() + 3600_000L)
+                    val timeHint = parsed?.formattedHint ?: expr
+
+                    val id = reminderRepo?.addReminder(title, triggerMillis, timeHint, cat) ?: 0L
+                    if (id > 0 && reminderScheduler != null) {
+                        reminderScheduler.scheduleReminder(id, title, triggerMillis, cat)
+                    }
+                    "تمت جدولة التذكير بنجاح: \"$title\" في الوقت المحدد ($timeHint)."
+                }
+
+                "get_active_reminders" -> {
+                    val list = reminderRepo?.getUpcomingReminders() ?: emptyList()
+                    if (list.isEmpty()) {
+                        "لا توجد مواعيد أو تذكيرات قادمة مسجلة حالياً."
+                    } else {
+                        val formatted = list.mapIndexed { i, r -> "${i + 1}. ${r.title} - ${r.timeHint}" }
+                        "التذكيرات والمواعيد القادمة:\n" + formatted.joinToString("\n")
+                    }
+                }
+
+                "start_reading_session" -> {
+                    val cid = arguments["contentId"]?.toString() ?: "content_heart_health"
+                    val dur = (arguments["durationMinutes"] as? Number)?.toInt() ?: 10
+                    val content = contentRepo?.getContentById(cid)
+                    val title = content?.title ?: "قراءة هادئة"
+                    contentRepo?.startReadingSession(cid, title, dur * 60)
+                    "بدأت جلسة القراءة لمدة $dur دقائق: $title."
+                }
+
+                "start_focus_session" -> {
+                    val dur = (arguments["durationMinutes"] as? Number)?.toInt() ?: 15
+                    val title = arguments["activityTitle"]?.toString() ?: "قراءة هادئة وتركيز"
+                    focusRepo?.startFocusSession(dur, title, 1)
+                    "بدأت جلسة التركيز لمدة $dur دقيقة بنجاح: $title."
+                }
+
+                "update_profile_from_conversation" -> {
+                    val current = profileRepo.getProfile()
+                    val newAge = (arguments["age"] as? Number)?.toInt() ?: current.identity.age
+                    val newAct = arguments["dailyActivity"]?.toString() ?: current.health.dailyActivity
+                    val newSleep = arguments["sleepQuality"]?.toString() ?: current.health.sleepQuality
+                    val updated = current.copy(
+                        identity = current.identity.copy(age = newAge),
+                        health = current.health.copy(
+                            dailyActivity = newAct,
+                            sleepQuality = newSleep
+                        )
+                    )
+                    profileRepo.updateProfile(updated)
+                    "تم تحديث بيانات الملف الشخصي بنجاح."
                 }
 
                 else -> "أداة غير معروفة: $toolName"

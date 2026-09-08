@@ -75,6 +75,7 @@ fun HomeScreen(
     onNavigateToFrench: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToReading: () -> Unit = {},
     onSpeakGreeting: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -292,6 +293,51 @@ fun HomeScreen(
                         onClick = onNavigateToFrench,
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+
+            // Daily Planner Banner
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable { onNavigateToReading() }
+                        .testTag("nav_reading_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = SageOlive.copy(alpha = 0.14f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(SageOlive, shape = CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MenuBook,
+                                contentDescription = null,
+                                tint = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "📖 جلسة القراءة الهادئة (10 دقايق)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "كيف يعمل قلبك؟ مضخة الحياة العجيبة مع مؤقت مريح وسؤال فهم.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 

@@ -25,6 +25,7 @@ object RafiqahDestinations {
     const val VOICE = "voice"
     const val LEARNING = "learning"
     const val FOCUS_SESSION = "focus_session"
+    const val READING = "reading"
     const val STORY = "story"
     const val HEALTH = "health"
     const val PLANNER = "planner"
@@ -43,6 +44,7 @@ fun RafiqahNavGraph(
     val memories by viewModel.memories.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
+    val activeReminders by viewModel.activeReminders.collectAsState()
     val frenchWords by viewModel.frenchWords.collectAsState()
     val messages by viewModel.messages.collectAsState()
     val isSpeaking by viewModel.isSpeaking.collectAsState()
@@ -70,6 +72,7 @@ fun RafiqahNavGraph(
                 onNavigateToFrench = { navController.navigate(RafiqahDestinations.FRENCH) },
                 onNavigateToProfile = { navController.navigate(RafiqahDestinations.PROFILE) },
                 onNavigateToSettings = { navController.navigate(RafiqahDestinations.SETTINGS) },
+                onNavigateToReading = { navController.navigate(RafiqahDestinations.READING) },
                 onSpeakGreeting = { viewModel.speakText(it) }
             )
         }
@@ -117,6 +120,20 @@ fun RafiqahNavGraph(
             )
         }
 
+        composable(RafiqahDestinations.READING) {
+            val contentList by viewModel.allContentItems.collectAsState()
+            val firstItem = contentList.firstOrNull()
+            com.example.ui.reading.ReadingScreen(
+                contentItem = firstItem,
+                onCompleteReading = { secs ->
+                    viewModel.saveLearningProgress("قراءة 10 دقائق: ${firstItem?.title ?: "الصحة"}", true)
+                    viewModel.completeMicroSession("session_reading_1")
+                },
+                onNavigateBack = { navController.popBackStack() },
+                onSpeak = { viewModel.speakText(it) }
+            )
+        }
+
         composable(RafiqahDestinations.STORY) {
             StoryScreen(
                 chapters = chapters,
@@ -139,8 +156,11 @@ fun RafiqahNavGraph(
         composable(RafiqahDestinations.PLANNER) {
             PlannerScreen(
                 tasks = tasks,
+                reminders = activeReminders,
                 onToggleTaskCompleted = { id, completed -> viewModel.toggleTask(id, completed) },
                 onAddTask = { title, timeHint -> viewModel.addTask(title, timeHint) },
+                onAddReminder = { title, timeExpr -> viewModel.addNaturalReminder(title, timeExpr) },
+                onCancelReminder = { id -> viewModel.cancelReminder(id) },
                 onNavigateBack = { navController.popBackStack() },
                 onSpeak = { viewModel.speakText(it) }
             )

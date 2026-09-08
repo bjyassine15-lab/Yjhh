@@ -6,17 +6,31 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.migration.Migration
+import com.example.data.local.dao.ContentDao
 import com.example.data.local.dao.DailyTaskDao
+import com.example.data.local.dao.FocusDao
 import com.example.data.local.dao.FrenchWordDao
+import com.example.data.local.dao.HealthDao
 import com.example.data.local.dao.LearningProgressDao
 import com.example.data.local.dao.MemoryDao
 import com.example.data.local.dao.ProfileDao
+import com.example.data.local.dao.ReminderDao
+import com.example.data.local.dao.RoutineDao
 import com.example.data.local.dao.StoryDao
+import com.example.data.local.entity.BlockedAppEntity
 import com.example.data.local.entity.ConceptProgressEntity
+import com.example.data.local.entity.ContentItemEntity
 import com.example.data.local.entity.DailyTaskEntity
+import com.example.data.local.entity.FocusSessionEntity
 import com.example.data.local.entity.FrenchWordEntity
+import com.example.data.local.entity.HabitEntity
+import com.example.data.local.entity.HealthObservationEntity
+import com.example.data.local.entity.HealthProfileEntity
 import com.example.data.local.entity.MemoryEntity
+import com.example.data.local.entity.MicroSessionEntity
 import com.example.data.local.entity.ProfileEntity
+import com.example.data.local.entity.ReadingSessionEntity
+import com.example.data.local.entity.ReminderEntity
 import com.example.data.local.entity.StoryChapterEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,9 +43,18 @@ import kotlinx.coroutines.launch
         StoryChapterEntity::class,
         DailyTaskEntity::class,
         FrenchWordEntity::class,
-        ConceptProgressEntity::class
+        ConceptProgressEntity::class,
+        HealthProfileEntity::class,
+        HealthObservationEntity::class,
+        HabitEntity::class,
+        MicroSessionEntity::class,
+        ContentItemEntity::class,
+        ReadingSessionEntity::class,
+        FocusSessionEntity::class,
+        BlockedAppEntity::class,
+        ReminderEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -41,6 +64,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dailyTaskDao(): DailyTaskDao
     abstract fun frenchWordDao(): FrenchWordDao
     abstract fun learningProgressDao(): LearningProgressDao
+    abstract fun healthDao(): HealthDao
+    abstract fun routineDao(): RoutineDao
+    abstract fun contentDao(): ContentDao
+    abstract fun focusDao(): FocusDao
+    abstract fun reminderDao(): ReminderDao
 
     companion object {
         @Volatile
@@ -301,6 +329,116 @@ abstract class AppDatabase : RoomDatabase() {
                     ConceptProgressEntity(conceptKey = "mitochondria", currentLevel = 1, mastery = "NOT_STARTED")
                 )
                 database.learningProgressDao().insertAll(initialConcepts)
+            }
+
+            // Seed Health Profile V3
+            if (database.healthDao().getHealthProfile() == null) {
+                database.healthDao().insertOrUpdateHealthProfile(
+                    HealthProfileEntity(
+                        id = 1,
+                        age = 53,
+                        sleepQuality = "نوم متقطع أحيانًا",
+                        sleepTimeHint = "23:00",
+                        wakeTimeHint = "07:00",
+                        activityLevel = "مشي خفيف ونشاط منزلي",
+                        waterIntakeGoalGlasses = 6,
+                        currentWaterGlasses = 3,
+                        dietaryHabits = "أكل منزلي تونسي معتدل وقليل الملح",
+                        generalGoals = "المشي 20 دقيقة وشرب الماء بانتظام"
+                    )
+                )
+                database.healthDao().insertHabit(
+                    HabitEntity(
+                        title = "شرب كأس ماء كبير على الصباح",
+                        targetFrequency = "DAILY",
+                        timeHint = "07:30",
+                        streakDays = 3
+                    )
+                )
+                database.healthDao().insertHabit(
+                    HabitEntity(
+                        title = "مشي خفيف 15 دقيقة بعد العصر",
+                        targetFrequency = "DAILY",
+                        timeHint = "17:00",
+                        streakDays = 2
+                    )
+                )
+            }
+
+            // Seed Educational Content Items for Reading Session
+            database.contentDao().insertContentItems(
+                listOf(
+                    ContentItemEntity(
+                        id = "content_heart_health",
+                        category = "HEALTH_EDUCATION",
+                        title = "كيف يعمل قلبك؟ مضخة الحياة العجيبة",
+                        body = "القلب هو العضلة الأقوى والأوفى في جسم الإنسان. ينبض أكثر من 100 ألف مرة كل يوم بدون توقف، ليضخ الدم المحمل بالأكسجين والغذاء إلى كل خلية في الجسم. تخيلي يا أمي أن هذه العضلة الصغيرة التي بحجم قبضة اليد ترسل الدم عبر أوعية دموية طولها آلاف الكيلومترات! المشي الخفيف يومياً، وشرب الماء، والابتعاد عن التوتر هو أحسن هدية تقدمينها لقلبك ليظل ينبض بالصحة والنشاط.",
+                        estimatedMinutes = 10,
+                        keyTakeaway = "المشي وشرب الماء والنوم الهادئ يحافظ على صحة عضلة القلب وضغط دم متوازن.",
+                        relatedConceptKey = "heart",
+                        quizQuestion = "كم مرة ينبض القلب تقريباً في اليوم؟",
+                        quizAnswer = "أكثر من 100 ألف مرة كل يوم."
+                    ),
+                    ContentItemEntity(
+                        id = "content_cell_membrane",
+                        category = "SCIENCE",
+                        title = "حارس الخلية: الغشاء الذكي",
+                        body = "في كل خلية من خلايا جسمنا، يوجد غشاء رقيق جداً يحميها كأنه سور بيت آمن. هذا الغشاء ليس جداراً أصمّ، بل هو حارس ذكي جداً يفتح الأبواب لدخول الماء والسكر والأكسجين، ويغلقها بإحكام أمام السموم والشوائب الضارة. سبحان الخالق في هذه الدقة التي تعمل داخلنا دون أن نشعر!",
+                        estimatedMinutes = 8,
+                        keyTakeaway = "غشاء الخلية حارس ذكي ينظم ما يدخل وما يخرج ليحافظ على توازن الخلية وسلامتها.",
+                        relatedConceptKey = "membrane",
+                        quizQuestion = "ما هي الوظيفة الأساسية لغشاء الخلية؟",
+                        quizAnswer = "حماية الخلية وتنظيم دخول الغذاء وخروج الفضلات كحارس ذكي."
+                    ),
+                    ContentItemEntity(
+                        id = "content_olive_tree",
+                        category = "CULTURE",
+                        title = "شجرة الزيتون المباركة في تونس",
+                        body = "شجرة الزيتون في تونس ليست مجرد شجرة، بل هي رمز للصبر والبركة والعطاء الممتد لآلاف السنين. أجدادنا اعتمدوا على زيت الزيتون كغذاء ودواء طبيعي يقوي المناعة ويحمي الشرايين. حبة الزيتون والزيت التونسي الأصيل يحملان مضادات أكسدة طبيعية تحافظ على شباب الخلايا وقوة الذاكرة.",
+                        estimatedMinutes = 10,
+                        keyTakeaway = "زيت الزيتون غذاء مبارك غني بمضادات الأكسدة التي تحمي القلب والشرايين.",
+                        relatedConceptKey = "nutrition",
+                        quizQuestion = "ما الفائدة الصحية الأساسية لزيت الزيتون الطبيعي؟",
+                        quizAnswer = "حماية شرايين القلب وخلايا الجسم بمضادات الأكسدة الطبيعية."
+                    )
+                )
+            )
+
+            // Seed initial daily micro-sessions
+            if (database.routineDao().getActiveMicroSessions().isEmpty()) {
+                database.routineDao().insertOrUpdateSessions(
+                    listOf(
+                        MicroSessionEntity(
+                            id = "session_reading_1",
+                            type = "READING",
+                            title = "قراءة هادئة: كيف يعمل قلبك؟",
+                            durationMinutes = 10,
+                            scheduledAtTimeHint = "10:30",
+                            isRequired = true,
+                            priority = 1,
+                            contentId = "content_heart_health"
+                        ),
+                        MicroSessionEntity(
+                            id = "session_french_1",
+                            type = "FRENCH",
+                            title = "كلمة فرنسية وتطبيق في الصيدلية",
+                            durationMinutes = 4,
+                            scheduledAtTimeHint = "15:00",
+                            isRequired = true,
+                            priority = 2
+                        ),
+                        MicroSessionEntity(
+                            id = "session_mental_1",
+                            type = "MENTAL_EXERCISE",
+                            title = "تمرين ذهني خفيف: استرجاع معلومات الخلية",
+                            durationMinutes = 3,
+                            scheduledAtTimeHint = "18:00",
+                            isRequired = false,
+                            priority = 3,
+                            relatedConceptKey = "cell"
+                        )
+                    )
+                )
             }
         }
     }

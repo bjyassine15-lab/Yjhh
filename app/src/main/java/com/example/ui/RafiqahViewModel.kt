@@ -64,6 +64,21 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     val plannerRepo = DailyPlannerRepository(db.dailyTaskDao())
     val frenchRepo = FrenchWordRepository(db.frenchWordDao())
     val learningProgressRepo = LearningProgressRepository(db.learningProgressDao())
+    val healthRepo = com.example.data.repository.HealthRepository(db.healthDao())
+    val routineRepo = com.example.data.repository.RoutineRepository(db.routineDao())
+    val contentRepo = com.example.data.repository.ContentRepository(db.contentDao())
+    val focusRepo = com.example.data.repository.FocusRepository(db.focusDao())
+    val reminderRepo = com.example.data.repository.ReminderRepository(db.reminderDao())
+    val reminderScheduler = com.example.service.reminder.ReminderScheduler(application)
+
+    val spacedRepetitionEngine = com.example.ai.learning.SpacedRepetitionEngine(learningProgressRepo)
+    val dailyRoutineEngine = com.example.ai.routine.DailyRoutineEngine(
+        routineRepo = routineRepo,
+        healthRepo = healthRepo,
+        reminderRepo = reminderRepo,
+        learningRepo = learningProgressRepo,
+        spacedRepetition = spacedRepetitionEngine
+    )
 
     // Gemini Authentication Abstraction & Secure Store (V2.6)
     val keyStore: GeminiApiKeyStore = EncryptedGeminiApiKeyStore(application)
@@ -98,7 +113,12 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         memoryRepo = memoryRepo,
         storyRepo = storyRepo,
         plannerRepo = plannerRepo,
-        frenchRepo = frenchRepo
+        frenchRepo = frenchRepo,
+        healthRepo = healthRepo,
+        reminderRepo = reminderRepo,
+        reminderScheduler = reminderScheduler,
+        contentRepo = contentRepo,
+        focusRepo = focusRepo
     )
 
     val voiceService = VoiceService(application)
@@ -147,6 +167,25 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val frenchWords: StateFlow<List<FrenchWordItem>> = frenchRepo.allWords
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // V3 Reactive Flows
+    val healthProfile = healthRepo.getHealthProfileFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val microSessions = routineRepo.getMicroSessionsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allContentItems = contentRepo.getAllContentFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeReminders = reminderRepo.getAllActiveRemindersFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val focusSessions = focusRepo.getAllSessionsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val blockedApps = focusRepo.getBlockedAppsFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Voice and Live Conversation states
@@ -406,6 +445,47 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     fun deleteMemory(id: Long) {
         viewModelScope.launch {
             memoryRepo.deleteMemory(id)
+        }
+    }
+
+    fun completeMicroSession(id: String) {
+        viewModelScope.launch {
+            routineRepo.markCompleted(id)
+        }
+    }
+
+    fun skipMicroSession(id: String) {
+        viewModelScope.launch {
+            routineRepo.markSkipped(id)
+        }
+    }
+
+    fun addNaturalReminder(title: String, timeExpression: String, category: String = "GENERAL") {
+        viewModelScope.launch {
+            val parsed = com.example.ai.datetime.NaturalDateTimeParser.parse(timeExpression)
+            val trigger = parsed?.timeMillis ?: (System.currentTimeMillis() + 3600_000L)
+            val hint = parsed?.formattedHint ?: timeExpression
+            val id = reminderRepo.addReminder(title, trigger, hint, category)
+            reminderScheduler.scheduleReminder(id, title, trigger, category)
+        }
+    }
+
+    fun cancelReminder(id: Long) {
+        viewModelScope.launch {
+            reminderRepo.cancelReminder(id)
+            reminderScheduler.cancelReminder(id)
+        }
+    }
+
+    fun startFocusSession(minutes: Int, activityTitle: String) {
+        viewModelScope.launch {
+            focusRepo.startFocusSession(minutes, activityTitle, 1)
+        }
+    }
+
+    fun toggleAppBlock(packageName: String, blocked: Boolean) {
+        viewModelScope.launch {
+            focusRepo.setAppBlocked(packageName, blocked)
         }
     }
 
