@@ -112,15 +112,15 @@ fun RafiqahNavGraph(
         }
 
         composable(RafiqahDestinations.FOCUS_SESSION) {
-            val activeFocusSession by viewModel.focusRepo.activeSession.collectAsState(initial = null)
+            val activeFocusSession by viewModel.focusRepo.getActiveFocusSessionFlow().collectAsState(initial = null)
             val blockingStatus by viewModel.appBlockingStatus.collectAsState()
             val targetMinutes = activeFocusSession?.targetDurationMinutes ?: 15
-            val actTitle = activeFocusSession?.activityTitle ?: "جلسة تركيز وقراءة هادئة"
+            val actTitle = activeFocusSession?.focusActivityTitle ?: "جلسة تركيز وقراءة هادئة"
 
             FocusSessionScreen(
                 targetDurationMinutes = targetMinutes,
                 activityTitle = actTitle,
-                blockingStatusMessage = blockingStatus,
+                blockingStatusMessage = blockingStatus.statusMessage,
                 onNavigateBack = {
                     viewModel.endFocusSession()
                     navController.popBackStack()

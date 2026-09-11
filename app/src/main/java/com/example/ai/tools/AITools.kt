@@ -458,15 +458,11 @@ open class ToolExecutor(
                     if (note.contains("نتحرك") || note.contains("مشي") || note.contains("حركة")) {
                         healthRepo?.addHabit("مشي خفيف 15 دقيقة بعد العصر", "17:00")
                         plannerRepo.addTask(
-                            com.example.data.local.model.DailyTask(
-                                id = 0,
-                                title = "مشي خفيف 15 دقيقة واستنشاق هواء نقي",
-                                category = com.example.data.local.model.TaskCategory.HEALTH_HABIT,
-                                timeHint = "17:00 العشية",
-                                isCompleted = false,
-                                note = "خطوة طيبة لتنشيط البدن والدورة الدموية",
-                                isPriority = true
-                            )
+                            title = "مشي خفيف 15 دقيقة واستنشاق هواء نقي",
+                            category = TaskCategory.HEALTH_HABIT,
+                            timeHint = "17:00 العشية",
+                            note = "خطوة طيبة لتنشيط البدن والدورة الدموية",
+                            isPriority = true
                         )
                     } else if (note.contains("نرقد") || note.contains("نوم") || note.contains("متأخر")) {
                         healthRepo?.addHabit("تهيئة النوم وقراءة هادئة", "22:30")
@@ -668,7 +664,7 @@ open class ToolExecutor(
                     // Also sync with health profile V3
                     val hp = healthRepo?.getHealthProfile()
                     if (hp != null) {
-                        healthRepo.updateHealthProfile(
+                        healthRepo.saveHealthProfile(
                             hp.copy(
                                 age = newAge,
                                 activityLevel = newAct,

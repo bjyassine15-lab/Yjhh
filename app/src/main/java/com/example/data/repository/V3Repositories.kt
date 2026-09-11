@@ -73,11 +73,17 @@ class ContentRepository(private val contentDao: ContentDao) {
 
     suspend fun recordReadingProgress(contentId: String, elapsedSeconds: Int, isCompleted: Boolean) {
         val session = contentDao.getLatestReadingSession()
+        val reqSecs = elapsedSeconds.coerceAtMost(600)
+        val optSecs = (elapsedSeconds - 600).coerceAtLeast(0)
+        val reqCompleted = isCompleted || elapsedSeconds >= 600
+
         if (session != null && session.contentId == contentId) {
             val updated = session.copy(
-                elapsedSeconds = elapsedSeconds,
-                isCompleted = isCompleted,
-                completedAt = if (isCompleted) System.currentTimeMillis() else null
+                elapsedRequiredSeconds = reqSecs,
+                elapsedOptionalSeconds = optSecs,
+                isRequiredCompleted = reqCompleted,
+                isFinished = isCompleted,
+                finishedAt = if (isCompleted) System.currentTimeMillis() else 0L
             )
             contentDao.updateReadingSession(updated)
         } else {
@@ -85,9 +91,11 @@ class ContentRepository(private val contentDao: ContentDao) {
                 ReadingSessionEntity(
                     contentId = contentId,
                     contentTitle = "قراءة هادئة",
-                    elapsedSeconds = elapsedSeconds,
-                    isCompleted = isCompleted,
-                    completedAt = if (isCompleted) System.currentTimeMillis() else null
+                    elapsedRequiredSeconds = reqSecs,
+                    elapsedOptionalSeconds = optSecs,
+                    isRequiredCompleted = reqCompleted,
+                    isFinished = isCompleted,
+                    finishedAt = if (isCompleted) System.currentTimeMillis() else 0L
                 )
             )
         }

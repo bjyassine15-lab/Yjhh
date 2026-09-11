@@ -537,11 +537,7 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
 
     fun evaluateConceptFromReading(conceptKey: String, isUnderstood: Boolean) {
         viewModelScope.launch {
-            if (isUnderstood) {
-                spacedRepetitionEngine.onUserUnderstood(conceptKey)
-            } else {
-                spacedRepetitionEngine.onUserConfused(conceptKey)
-            }
+            spacedRepetitionEngine.recordAttempt(conceptKey, isUnderstood)
             val statusText = if (isUnderstood) "أتقنت أمي مفهوم" else "يحتاج مفهوم"
             memoryRepo.saveMemoryWithDeduplication(
                 content = "$statusText $conceptKey ${if (isUnderstood) "بنجاح" else "مراجعة إضافية"}.",
