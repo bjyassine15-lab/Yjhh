@@ -300,9 +300,43 @@ object AIToolRegistry {
             parametersSchema = JSONObject().apply {
                 put("type", "OBJECT")
                 put("properties", JSONObject().apply {
+                    put("name", buildParam("STRING", "الاسم إذا ذكرته أمي"))
                     put("age", buildParam("INTEGER", "العمر إذا ذكرته أمي"))
+                    put("dialect", buildParam("STRING", "اللهجة المفضلة"))
+                    put("healthStatus", buildParam("STRING", "الحالة الصحية العامة"))
+                    put("primaryGoal", buildParam("STRING", "الهدف الأساسي"))
                     put("dailyActivity", buildParam("STRING", "النشاط اليومي أو العادات"))
                     put("sleepQuality", buildParam("STRING", "طبيعة النوم وأوقاته"))
+                })
+            }
+        ),
+        ToolDefinition(
+            name = "create_french_lesson",
+            description = "إنشاء درس ومفردة فرنسية جديدة مع السياق التونسي والنطق الصوتي",
+            accessLevel = ToolAccessLevel.SAFE_WRITE,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("frenchWord", buildParam("STRING", "الكلمة بالفرنسية"))
+                    put("phoneticArabic", buildParam("STRING", "النطق التقريبي بالحروف العربية"))
+                    put("tunisianMeaning", buildParam("STRING", "المعنى والشرح باللهجة التونسية"))
+                    put("examplePhrase", buildParam("STRING", "مثال عملي في جملة يومية"))
+                    put("category", buildParam("STRING", "التصنيف: PHARMACY, MEDICAL, DAILY_LIFE"))
+                })
+                put("required", JSONArray().apply { put("frenchWord"); put("phoneticArabic") })
+            }
+        ),
+        ToolDefinition(
+            name = "log_health_checkin",
+            description = "تسجيل متابعة صحية سريعة مثل شرب الماء أو قياس الضغط أو المشي",
+            accessLevel = ToolAccessLevel.SAFE_WRITE,
+            parametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("waterGlasses", buildParam("INTEGER", "عدد كؤوس الماء"))
+                    put("bloodPressureSystolic", buildParam("INTEGER", "الضغط الانقباضي"))
+                    put("bloodPressureDiastolic", buildParam("INTEGER", "الضغط الانبساطي"))
+                    put("feelingNotes", buildParam("STRING", "ملاحظات إحساس الأم ونشاطها"))
                 })
             }
         )
@@ -674,6 +708,56 @@ open class ToolExecutor(
                     }
 
                     "تم تحديث بيانات الملف الشخصي والصحي بنجاح."
+                }
+
+                "create_french_lesson" -> {
+                    val word = arguments["frenchWord"]?.toString() ?: return "خطأ: الكلمة الفرنسية فارغة"
+                    val phonetic = arguments["phoneticArabic"]?.toString() ?: ""
+                    val meaning = arguments["tunisianMeaning"]?.toString() ?: ""
+                    val example = arguments["examplePhrase"]?.toString() ?: ""
+                    val cat = arguments["category"]?.toString() ?: "DAILY_LIFE"
+
+                    val all = frenchRepo.getAllWordsList()
+                    val newId = (all.maxOfOrNull { it.id } ?: 10) + 1
+                    val entity = com.example.data.local.entity.FrenchWordEntity(
+                        id = newId,
+                        frenchWord = word,
+                        arabicPhonetics = phonetic,
+                        arabicMeaning = meaning,
+                        tunisianEverydayContext = "سياق الاستعمال اليومي: $example",
+                        medicalContext = if (cat == "MEDICAL" || cat == "PHARMACY") "سياق طبي وصيدلي" else "",
+                        exampleDailySentence = example,
+                        exampleMedicalSentence = "",
+                        interactivePrompt = "قولي معايا يا أمي: $phonetic ($word)",
+                        isMastered = false
+                    )
+                    frenchRepo.insertWord(entity)
+                    "تمت إضافة الكلمة الفرنسية \"$word\" بنجاح إلى قاموس التعلم (معرف: $newId)."
+                }
+
+                "log_health_checkin" -> {
+                    val water = (arguments["waterGlasses"] as? Number)?.toInt()
+                    val sys = (arguments["bloodPressureSystolic"] as? Number)?.toInt()
+                    val dia = (arguments["bloodPressureDiastolic"] as? Number)?.toInt()
+                    val notes = arguments["feelingNotes"]?.toString() ?: ""
+
+                    val noteParts = mutableListOf<String>()
+                    if (water != null && water > 0) noteParts.add("شربت $water كؤوس ماء")
+                    if (sys != null && dia != null) noteParts.add("قياس ضغط الدم: $sys/$dia")
+                    if (notes.isNotBlank()) noteParts.add(notes)
+
+                    val summaryNote = if (noteParts.isNotEmpty()) noteParts.joinToString(" - ") else "متابعة صحية روتينية"
+                    healthRepo?.addObservation(summaryNote, "CHECKIN")
+                    memoryRepo.saveMemoryWithDeduplication(summaryNote, MemoryCategory.HEALTH, 3, "متابعة صحية يومية")
+
+                    if (water != null && water > 0) {
+                        val hp = healthRepo?.getHealthProfile()
+                        if (hp != null) {
+                            healthRepo.saveHealthProfile(hp.copy(currentWaterGlasses = hp.currentWaterGlasses + water))
+                        }
+                    }
+
+                    "تم تسجيل المتابعة الصحية بنجاح: $summaryNote"
                 }
 
                 else -> "أداة غير معروفة: $toolName"

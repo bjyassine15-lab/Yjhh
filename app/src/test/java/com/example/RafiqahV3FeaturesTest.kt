@@ -1,0 +1,287 @@
+package com.example
+
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.example.ai.datetime.NaturalDateTimeParser
+import com.example.ai.learning.ContentSelectionEngine
+import com.example.ai.learning.FrenchLessonGenerator
+import com.example.ai.learning.SpacedRepetitionEngine
+import com.example.ai.routine.DailyRoutineEngine
+import com.example.ai.tools.ToolExecutor
+import com.example.data.local.AppDatabase
+import com.example.data.repository.ContentRepository
+import com.example.data.repository.DailyPlannerRepository
+import com.example.data.repository.FocusRepository
+import com.example.data.repository.FrenchWordRepository
+import com.example.data.repository.HealthRepository
+import com.example.data.repository.LearningProgressRepository
+import com.example.data.repository.MemoryRepository
+import com.example.data.repository.ProfileRepository
+import com.example.data.repository.ReminderRepository
+import com.example.data.repository.RoutineRepository
+import com.example.data.repository.StoryRepository
+import com.example.service.focus.AppBlockingController
+import com.example.service.focus.FocusBlockingMode
+import com.example.service.reminder.ReminderScheduler
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.util.Calendar
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
+class RafiqahV3FeaturesTest {
+
+    private lateinit var context: Context
+    private lateinit var db: AppDatabase
+    private lateinit var profileRepo: ProfileRepository
+    private lateinit var memoryRepo: MemoryRepository
+    private lateinit var storyRepo: StoryRepository
+    private lateinit var plannerRepo: DailyPlannerRepository
+    private lateinit var frenchRepo: FrenchWordRepository
+    private lateinit var learningRepo: LearningProgressRepository
+    private lateinit var healthRepo: HealthRepository
+    private lateinit var routineRepo: RoutineRepository
+    private lateinit var contentRepo: ContentRepository
+    private lateinit var focusRepo: FocusRepository
+    private lateinit var reminderRepo: ReminderRepository
+    private lateinit var reminderScheduler: ReminderScheduler
+
+    private lateinit var spacedRepetition: SpacedRepetitionEngine
+    private lateinit var contentSelection: ContentSelectionEngine
+    private lateinit var dailyRoutineEngine: DailyRoutineEngine
+    private lateinit var toolExecutor: ToolExecutor
+    private lateinit var appBlockingController: AppBlockingController
+    private lateinit var frenchLessonGenerator: FrenchLessonGenerator
+
+    @Before
+    fun setup() {
+        context = ApplicationProvider.getApplicationContext()
+        db = AppDatabase.getInstance(context)
+        profileRepo = ProfileRepository(db.profileDao())
+        memoryRepo = MemoryRepository(db.memoryDao())
+        storyRepo = StoryRepository(db.storyDao())
+        plannerRepo = DailyPlannerRepository(db.dailyTaskDao())
+        frenchRepo = FrenchWordRepository(db.frenchWordDao())
+        learningRepo = LearningProgressRepository(db.learningProgressDao())
+        healthRepo = HealthRepository(db.healthDao())
+        routineRepo = RoutineRepository(db.routineDao())
+        contentRepo = ContentRepository(db.contentDao())
+        focusRepo = FocusRepository(db.focusDao())
+        reminderRepo = ReminderRepository(db.reminderDao())
+        reminderScheduler = ReminderScheduler(context)
+
+        spacedRepetition = SpacedRepetitionEngine(learningRepo)
+        contentSelection = ContentSelectionEngine(contentRepo, db.contentDao(), learningRepo, spacedRepetition)
+        dailyRoutineEngine = DailyRoutineEngine(
+            routineRepo = routineRepo,
+            healthRepo = healthRepo,
+            reminderRepo = reminderRepo,
+            learningRepo = learningRepo,
+            spacedRepetition = spacedRepetition,
+            contentSelectionEngine = contentSelection
+        )
+        toolExecutor = ToolExecutor(
+            profileRepo = profileRepo,
+            memoryRepo = memoryRepo,
+            storyRepo = storyRepo,
+            plannerRepo = plannerRepo,
+            frenchRepo = frenchRepo,
+            healthRepo = healthRepo,
+            reminderRepo = reminderRepo,
+            reminderScheduler = reminderScheduler,
+            contentRepo = contentRepo,
+            focusRepo = focusRepo
+        )
+        appBlockingController = AppBlockingController(context, focusRepo)
+        frenchLessonGenerator = FrenchLessonGenerator(frenchRepo)
+    }
+
+    @After
+    fun tearDown() {
+        // cleanup if needed
+    }
+
+    // 1. Natural DateTime Parser & Disambiguation Test
+    @Test
+    fun testNaturalDateTimeParser_RelativeAndKeywords() {
+        val now = System.currentTimeMillis()
+        val afterOneHour = NaturalDateTimeParser.parse("بعد ساعة", referenceTimeMillis = now)
+        assertNotNull(afterOneHour)
+        assertTrue(afterOneHour!!.timeMillis > now)
+
+        val tomorrowMorning = NaturalDateTimeParser.parse("غدوة الصباح على الثمانية", referenceTimeMillis = now)
+        assertNotNull(tomorrowMorning)
+        assertFalse(tomorrowMorning!!.isAmbiguous)
+        assertTrue(tomorrowMorning.formattedHint.contains("غدوة"))
+
+        // Ambiguous time without context: "على العشرة" (AM or PM not specified)
+        val ambiguous = NaturalDateTimeParser.parse("على العشرة", referenceTimeMillis = now)
+        assertNotNull(ambiguous)
+        assertTrue(ambiguous!!.isAmbiguous)
+        assertNotNull(ambiguous.disambiguationQuestion)
+    }
+
+    // 2. Reminder Creation & Tool Execution with Recurring Rules Test
+    @Test
+    fun testReminderToolExecution_WithRecurrenceAndDestination() = runBlocking {
+        val args = mapOf(
+            "title" to "دواء الضغط بعد الفطور",
+            "timeExpression" to "غدوة الصباح على الثمانية",
+            "category" to "MEDICINE",
+            "isRecurring" to true,
+            "recurrenceRule" to "DAILY"
+        )
+        val result = toolExecutor.executeTool("create_reminder", args)
+        assertTrue(result.contains("تمت جدولة التذكير بنجاح") || result.contains("دواء الضغط"))
+
+        val activeReminders = reminderRepo.getUpcomingReminders()
+        assertTrue(activeReminders.any { it.title.contains("دواء الضغط") })
+        val reminder = activeReminders.first { it.title.contains("دواء الضغط") }
+        assertTrue(reminder.isRecurring)
+        assertEquals("DAILY", reminder.recurrenceRule)
+        assertEquals("MEDICINE", reminder.category)
+    }
+
+    // 3. Spaced Repetition & Knowledge State Progression Test
+    @Test
+    fun testSpacedRepetition_StateProgression() = runBlocking {
+        val conceptKey = "heart_vascular"
+        
+        // Initial state before any reviews
+        var state = spacedRepetition.getConceptState(conceptKey)
+        assertEquals(com.example.ai.learning.KnowledgeState.NOT_INTRODUCED, state.state)
+
+        // Record a correct attempt
+        state = spacedRepetition.recordAttempt(conceptKey, isCorrect = true)
+        assertEquals(com.example.ai.learning.KnowledgeState.LEARNING, state.state)
+        assertFalse(learningRepo.getProgress(conceptKey)!!.needsReview)
+
+        // Record confusion / wrong answer -> transitions to NEEDS_REVIEW
+        state = spacedRepetition.recordAttempt(conceptKey, isCorrect = false)
+        assertEquals(com.example.ai.learning.KnowledgeState.NEEDS_REVIEW, state.state)
+        assertTrue(learningRepo.getProgress(conceptKey)!!.needsReview)
+
+        // Check due reviews
+        val dueReviews = spacedRepetition.getDueReviews()
+        assertTrue(dueReviews.contains(conceptKey))
+
+        // Multiple successes lead to MASTERED
+        spacedRepetition.recordAttempt(conceptKey, isCorrect = true)
+        spacedRepetition.recordAttempt(conceptKey, isCorrect = true)
+        val finalState = spacedRepetition.recordAttempt(conceptKey, isCorrect = true)
+        assertEquals(com.example.ai.learning.KnowledgeState.MASTERED, finalState.state)
+    }
+
+    // 4. French Lesson Dynamic Creation & Persistence Test
+    @Test
+    fun testCreateFrenchLesson_ToolAndPersistence() = runBlocking {
+        val args = mapOf(
+            "frenchWord" to "Une ordonnance",
+            "phoneticArabic" to "أُوردُونَانْسْ",
+            "tunisianMeaning" to "ورقة الدواء متاع الطبيب (الوصفة)",
+            "examplePhrase" to "هزيت الأوردونانس للفارماسي",
+            "category" to "PHARMACY"
+        )
+        val toolResult = toolExecutor.executeTool("create_french_lesson", args)
+        assertTrue(toolResult.contains("Une ordonnance") || toolResult.contains("تمت إضافة"))
+
+        val allWords = frenchRepo.allWords.first()
+        val found = allWords.find { it.frenchWord.equals("Une ordonnance", ignoreCase = true) }
+        assertNotNull(found)
+        assertEquals("أُوردُونَانْسْ", found!!.arabicPhonetics)
+        assertTrue(found.tunisianEverydayContext.contains("هزيت الأوردونانس"))
+    }
+
+    // 5. App Blocking Controller Real State & Fallback Test
+    @Test
+    fun testAppBlockingController_RealStateBehavior() = runBlocking {
+        // AppBlockingController checks real PackageUsageStats permissions
+        val hasPermission = appBlockingController.checkUsageAccessPermission()
+        val status = appBlockingController.status.first()
+
+        assertNotNull(status)
+        if (!hasPermission) {
+            assertEquals(FocusBlockingMode.TIMER_ONLY, status.focusBlockingMode)
+            assertTrue(status.explanationNote.contains("TIMER_ONLY") || status.explanationNote.contains("المؤقت الهادئ"))
+        }
+
+        // Toggle app block in database
+        val testPkg = "com.android.chrome"
+        focusRepo.addBlockedApp(testPkg, "Chrome")
+        focusRepo.setAppBlocked(testPkg, true)
+        val blockedApps = focusRepo.getBlockedAppsFlow().first()
+        assertTrue(blockedApps.any { it.packageName == testPkg && it.isBlocked })
+    }
+
+    // 6. Profile and Health Data Consolidation Test
+    @Test
+    fun testProfileAndHealthDataUpdate() = runBlocking {
+        val profileArgs = mapOf(
+            "name" to "أمي صليحة",
+            "age" to 66,
+            "dialect" to "TUNISIAN",
+            "healthStatus" to "ضغط دم خفيف ومتابعة طبية منتظمة",
+            "primaryGoal" to "النشاط الذهني والراحة"
+        )
+        val profileRes = toolExecutor.executeTool("update_profile_from_conversation", profileArgs)
+        assertTrue(profileRes.contains("تم تحديث") || profileRes.contains("بنجاح"))
+
+        val profile = profileRepo.getProfile()
+        assertEquals(66, profile.identity.age)
+
+        // Health log
+        val healthArgs = mapOf(
+            "waterGlasses" to 6,
+            "bloodPressureSystolic" to 125,
+            "bloodPressureDiastolic" to 82,
+            "feelingNotes" to "نشاط ممتاز بعد المشي الصباحي"
+        )
+        val healthRes = toolExecutor.executeTool("log_health_checkin", healthArgs)
+        assertTrue(healthRes.contains("تم تسجيل المتابعة الصحية بنجاح"))
+
+        val healthProfile = healthRepo.getHealthProfile()
+        assertNotNull(healthProfile)
+        assertEquals(6, healthProfile!!.currentWaterGlasses)
+        val obs = healthRepo.getRecentObservations(5)
+        assertTrue(obs.any { it.observationText.contains("125/82") })
+    }
+
+    // 7. Dynamic Daily Routine Generation Test
+    @Test
+    fun testDailyRoutineEngine_DynamicGenerationAndLifecycle() = runBlocking {
+        val sessions = dailyRoutineEngine.generateOrRefreshDailyPlan()
+        assertTrue(sessions.isNotEmpty())
+
+        val firstSession = sessions.first()
+        assertEquals("PLANNED", firstSession.status)
+
+        // Lifecycle: Start session
+        dailyRoutineEngine.startSession(firstSession.id)
+        var updated = routineRepo.getSessionsForDate(dailyRoutineEngine.getTodayDateKey()).first { it.id == firstSession.id }
+        assertEquals("STARTED", updated.status)
+
+        // Lifecycle: Complete session
+        dailyRoutineEngine.completeSession(firstSession.id)
+        updated = routineRepo.getSessionsForDate(dailyRoutineEngine.getTodayDateKey()).first { it.id == firstSession.id }
+        assertEquals("COMPLETED", updated.status)
+
+        // Reschedule another session
+        val secondSession = sessions[1]
+        dailyRoutineEngine.rescheduleMissedActivity(secondSession.id, "17:30")
+        val rescheduled = routineRepo.getSessionsForDate(dailyRoutineEngine.getTodayDateKey()).first { it.id == secondSession.id }
+        assertEquals("RESCHEDULED", rescheduled.status)
+        assertEquals("17:30", rescheduled.scheduledAtTimeHint)
+    }
+}
