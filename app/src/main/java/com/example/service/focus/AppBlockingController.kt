@@ -14,23 +14,30 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class BlockingState {
-    NOT_AVAILABLE,                   // Device doesn't support or feature is unavailable
-    AVAILABLE_WITH_SPECIAL_ACCESS,   // Supported, but special permission (Usage Access) needed
-    ACTIVE,                          // Policy actively blocking/monitoring chosen apps during Focus
-    INACTIVE                         // Ready to be activated when Focus starts
+    NOT_CONFIGURED, // Special permission (Usage Access) has not been granted yet
+    AVAILABLE,      // Usage access granted, ready to monitor/block chosen apps
+    ACTIVE,         // Focus session is active and app blocking/monitoring policy is active
+    UNAVAILABLE     // System or platform does not support app blocking
+}
+
+enum class FocusBlockingMode {
+    ACTIVE,         // Real blocking / foreground monitoring active
+    TIMER_ONLY      // Standard quiet timer mode; apps are not blocked forcefully
 }
 
 data class BlockingStatus(
     val state: BlockingState,
+    val focusBlockingMode: FocusBlockingMode,
     val hasUsageAccess: Boolean,
     val activeBlockedAppsCount: Int,
-    val statusMessage: String
+    val statusMessage: String,
+    val explanationNote: String
 )
 
 /**
  * Real Android AppBlockingController adhering to Android platform security and policies.
  * Uses UsageStatsManager & AppOpsManager to verify access, manages blocked apps list,
- * and activates/deactivates the focus blocking policy gracefully.
+ * detects foreground applications, and provides honest UI states without fake blocking.
  */
 class AppBlockingController(
     private val context: Context,
@@ -70,6 +77,29 @@ class AppBlockingController(
         }
     }
 
+    /**
+     * Checks the currently foreground app using real Android UsageStatsManager
+     */
+    fun getCurrentlyForegroundApp(): String? {
+        if (!checkUsageAccessPermission()) return null
+        return try {
+            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager ?: return null
+            val now = System.currentTimeMillis()
+            val events = usageStatsManager.queryEvents(now - 15_000, now)
+            var lastForegroundPkg: String? = null
+            val event = android.app.usage.UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
+                    lastForegroundPkg = event.packageName
+                }
+            }
+            lastForegroundPkg
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun refreshStatus(): BlockingStatus {
         val blockedApps = focusRepo.getActiveBlockedApps()
         val updated = computeCurrentStatus(blockedApps)
@@ -90,25 +120,36 @@ class AppBlockingController(
     private fun computeCurrentStatus(blockedApps: List<BlockedAppEntity>): BlockingStatus {
         val hasPermission = checkUsageAccessPermission()
         val state = when {
-            isFocusPolicyActive && hasPermission -> BlockingState.ACTIVE
-            isFocusPolicyActive && !hasPermission -> BlockingState.AVAILABLE_WITH_SPECIAL_ACCESS
-            !hasPermission -> BlockingState.AVAILABLE_WITH_SPECIAL_ACCESS
-            blockedApps.isEmpty() -> BlockingState.INACTIVE
-            else -> BlockingState.INACTIVE
+            !hasPermission -> BlockingState.NOT_CONFIGURED
+            isFocusPolicyActive -> BlockingState.ACTIVE
+            else -> BlockingState.AVAILABLE
+        }
+
+        val mode = if (state == BlockingState.ACTIVE && hasPermission && blockedApps.isNotEmpty()) {
+            FocusBlockingMode.ACTIVE
+        } else {
+            FocusBlockingMode.TIMER_ONLY
         }
 
         val message = when (state) {
-            BlockingState.ACTIVE -> "وضع التركيز نشط: يتم مراقبة ${blockedApps.size} تطبيق للحد من التشتت."
-            BlockingState.AVAILABLE_WITH_SPECIAL_ACCESS -> "لحجب التطبيقات المشتتة، يتطلب النظام تفعيل إذن الوصول للاستخدام (Usage Access) من الإعدادات."
-            BlockingState.INACTIVE -> if (blockedApps.isEmpty()) "لم يتم تحديد تطبيقات لحجبها أثناء التركيز." else "جاهز للتفعيل عند بدء الجلسة (${blockedApps.size} تطبيق محدد)."
-            BlockingState.NOT_AVAILABLE -> "ميزة الحجب المتقدم غير مدعومة على هذا النظام."
+            BlockingState.NOT_CONFIGURED -> "إذن الوصول للاستخدام غير مفعّل (NOT_CONFIGURED)"
+            BlockingState.AVAILABLE -> if (blockedApps.isEmpty()) "جاهز للتفعيل (لم يتم تحديد تطبيقات لحجبها بعد)" else "جاهز للتفعيل مع ${blockedApps.size} تطبيق محدد"
+            BlockingState.ACTIVE -> "حماية التركيز مفعلة (${blockedApps.size} تطبيق مراقب)"
+            BlockingState.UNAVAILABLE -> "الحجب المتقدم غير متاح على هذا النظام"
+        }
+
+        val explanation = when (mode) {
+            FocusBlockingMode.ACTIVE -> "وضع الحجب النشط: يتم رصد التطبيقات المشتتة وتنبيه الأم لحماية وقت التركيز."
+            FocusBlockingMode.TIMER_ONLY -> "وضع المؤقت الهادئ (TIMER_ONLY): حساب الوقت دون إغلاق التطبيقات قسراً لعدم توفر الصلاحية الإدارية."
         }
 
         return BlockingStatus(
             state = state,
+            focusBlockingMode = mode,
             hasUsageAccess = hasPermission,
             activeBlockedAppsCount = blockedApps.size,
-            statusMessage = message
+            statusMessage = message,
+            explanationNote = explanation
         )
     }
 }

@@ -1,5 +1,6 @@
 package com.example.ai.routine
 
+import com.example.ai.learning.ContentSelectionEngine
 import com.example.ai.learning.KnowledgeState
 import com.example.ai.learning.SpacedRepetitionEngine
 import com.example.data.local.entity.MicroSessionEntity
@@ -7,7 +8,10 @@ import com.example.data.repository.HealthRepository
 import com.example.data.repository.LearningProgressRepository
 import com.example.data.repository.ReminderRepository
 import com.example.data.repository.RoutineRepository
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 data class DailyCoachSummary(
     val greeting: String,
@@ -17,95 +21,143 @@ data class DailyCoachSummary(
 )
 
 /**
- * Intelligent dynamic daily routine generator for Rafiqah V3.
+ * Intelligent, persistent dynamic daily routine generator for Rafiqah V3.
+ * Eliminates static fallback sessions. Routine is derived from real reminders,
+ * due spaced repetition concepts, health habit records, and user preferences.
+ * Persists statuses (PLANNED, STARTED, COMPLETED, SKIPPED, RESCHEDULED) across app restarts.
  */
 class DailyRoutineEngine(
     private val routineRepo: RoutineRepository,
     private val healthRepo: HealthRepository,
     private val reminderRepo: ReminderRepository,
     private val learningRepo: LearningProgressRepository,
-    private val spacedRepetition: SpacedRepetitionEngine
+    private val spacedRepetition: SpacedRepetitionEngine,
+    private val contentSelectionEngine: ContentSelectionEngine? = null
 ) {
 
+    fun getTodayDateKey(): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
+    }
+
     suspend fun generateOrRefreshDailyPlan(): List<MicroSessionEntity> {
-        val currentSessions = routineRepo.getActiveMicroSessions()
-        if (currentSessions.isNotEmpty()) {
-            return currentSessions
+        val todayKey = getTodayDateKey()
+        val existingTodaySessions = routineRepo.getSessionsForDate(todayKey)
+
+        // If today's plan already exists, persist state across restarts!
+        if (existingTodaySessions.isNotEmpty()) {
+            return existingTodaySessions
         }
 
-        // Build personalized plan based on knowledge needs, wellness habits, and time
         val sessions = mutableListOf<MicroSessionEntity>()
-        val cal = Calendar.getInstance()
-        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        var priorityCounter = 1
 
-        // 1. Reading Micro-session (10 mins)
-        sessions.add(
-            MicroSessionEntity(
-                id = "reading_session_${System.currentTimeMillis()}",
-                type = "READING",
-                title = "قراءة هادئة: كيف يعمل قلبك؟",
-                durationMinutes = 10,
-                scheduledAtTimeHint = "10:00",
-                isRequired = true,
-                priority = 1,
-                contentId = "content_heart_health",
-                relatedConceptKey = "heart"
+        // 1. Reminders & scheduled appointments
+        val upcomingReminders = reminderRepo.getUpcomingReminders()
+        upcomingReminders.take(2).forEach { reminder ->
+            sessions.add(
+                MicroSessionEntity(
+                    id = "reminder_${reminder.id}_$todayKey",
+                    type = "REMINDER",
+                    title = "موعد هام: ${reminder.title}",
+                    durationMinutes = 5,
+                    scheduledAtTimeHint = reminder.timeHint,
+                    isRequired = true,
+                    priority = priorityCounter++,
+                    status = "PLANNED",
+                    dateKey = todayKey,
+                    requiredDurationSeconds = 300
+                )
             )
-        )
-
-        // 2. French Micro-lesson (4 mins)
-        sessions.add(
-            MicroSessionEntity(
-                id = "french_session_${System.currentTimeMillis() + 1}",
-                type = "FRENCH",
-                title = "كلمة فرنسية مفيدة: في الصيدلية والمستشفى",
-                durationMinutes = 4,
-                scheduledAtTimeHint = "15:30",
-                isRequired = true,
-                priority = 2
-            )
-        )
-
-        // 3. Learning review or quick concept recall based on real due reviews
-        val dueConcepts = spacedRepetition.getDueReviews()
-        val targetConcept = dueConcepts.firstOrNull() ?: "cell"
-        val conceptState = spacedRepetition.getConceptState(targetConcept)
-        val reviewTitle = when (conceptState.state) {
-            KnowledgeState.NEEDS_REVIEW -> "مراجعة خفيفة وتثبيت: ${conceptState.title}"
-            KnowledgeState.LEARNING, KnowledgeState.PARTIALLY_UNDERSTOOD -> "استرجاع سريع: ${conceptState.title}"
-            KnowledgeState.MASTERED -> "تمرين ذهني خفيف: استرجاع معلومات ${conceptState.title}"
-            else -> "اكتشاف مفهوم علمي جديد: ${conceptState.title}"
         }
-        sessions.add(
-            MicroSessionEntity(
-                id = "concept_session_${System.currentTimeMillis() + 2}",
-                type = "CONCEPT_REVIEW",
-                title = reviewTitle,
-                durationMinutes = 3,
-                scheduledAtTimeHint = "18:00",
-                isRequired = false,
-                priority = 3,
-                relatedConceptKey = targetConcept
-            )
-        )
 
-        // 4. Health habit micro-session (5 mins)
+        // 2. Health & Wellness habits
         val healthProfile = healthRepo.getHealthProfile()
-        val healthTitle = if ((healthProfile?.currentWaterGlasses ?: 0) < 4) {
-            "معلومة صحية: شرب الماء وسلامة الشرايين"
+        val waterGlasses = healthProfile?.currentWaterGlasses ?: 0
+        val healthTitle = if (waterGlasses < 4) {
+            "عافية وصحة: شرب الماء وترطيب الجسم"
         } else {
-            "عادتنا اليومية: مشي خفيف ونشاط هادئ"
+            "نشاط وحيوية: مشي خفيف وتمارين استرخاء"
         }
         sessions.add(
             MicroSessionEntity(
-                id = "health_session_${System.currentTimeMillis() + 3}",
-                type = "HEALTH_EDUCATION",
+                id = "health_${System.currentTimeMillis()}_$todayKey",
+                type = "HEALTH_HABIT",
                 title = healthTitle,
                 durationMinutes = 5,
-                scheduledAtTimeHint = "19:00",
+                scheduledAtTimeHint = "09:30",
                 isRequired = false,
-                priority = 4,
-                contentId = "content_heart_health"
+                priority = priorityCounter++,
+                status = "PLANNED",
+                dateKey = todayKey,
+                requiredDurationSeconds = 300
+            )
+        )
+
+        // 3. Dynamic Educational Reading (Driven by ContentSelectionEngine & Spaced Repetition)
+        val dueConcepts = spacedRepetition.getDueReviews()
+        val primaryDueConcept = dueConcepts.firstOrNull()
+
+        val selectedContent = contentSelectionEngine?.selectContentForSession(
+            sessionType = "READING",
+            preferredConceptKey = primaryDueConcept
+        )
+
+        val readingTitle = if (selectedContent != null) {
+            "جلسة قراءة: ${selectedContent.title}"
+        } else if (primaryDueConcept != null) {
+            val conceptState = spacedRepetition.getConceptState(primaryDueConcept)
+            "مراجعة وتثبيت: ${conceptState.title}"
+        } else {
+            "قراءة هادئة: كيف يعمل قلبك؟ مضخة الحياة"
+        }
+
+        val readingMinutes = selectedContent?.estimatedMinutes ?: 10
+        sessions.add(
+            MicroSessionEntity(
+                id = "reading_${System.currentTimeMillis()}_$todayKey",
+                type = "READING",
+                title = readingTitle,
+                durationMinutes = readingMinutes,
+                scheduledAtTimeHint = "11:00",
+                isRequired = true,
+                priority = priorityCounter++,
+                contentId = selectedContent?.id ?: "content_heart_health",
+                relatedConceptKey = selectedContent?.relatedConceptKey ?: primaryDueConcept ?: "heart",
+                status = "PLANNED",
+                dateKey = todayKey,
+                requiredDurationSeconds = readingMinutes * 60
+            )
+        )
+
+        // 4. French Daily Micro-Lesson
+        sessions.add(
+            MicroSessionEntity(
+                id = "french_${System.currentTimeMillis()}_$todayKey",
+                type = "FRENCH",
+                title = "كلمات فرنسية مفيدة: في الصيدلية والحياة اليومية",
+                durationMinutes = 4,
+                scheduledAtTimeHint = "16:00",
+                isRequired = true,
+                priority = priorityCounter++,
+                status = "PLANNED",
+                dateKey = todayKey,
+                requiredDurationSeconds = 240
+            )
+        )
+
+        // 5. Evening Recap / Relaxing Story
+        sessions.add(
+            MicroSessionEntity(
+                id = "evening_${System.currentTimeMillis()}_$todayKey",
+                type = "STORY",
+                title = "جلسة مسائية: حكاية مريحة واسترجاع طيب",
+                durationMinutes = 6,
+                scheduledAtTimeHint = "20:00",
+                isRequired = false,
+                priority = priorityCounter++,
+                status = "PLANNED",
+                dateKey = todayKey,
+                requiredDurationSeconds = 360
             )
         )
 
@@ -121,7 +173,7 @@ class DailyRoutineEngine(
         reminders.take(2).forEach {
             priorities.add("موعد: ${it.title} (${it.timeHint})")
         }
-        sessions.filter { it.isRequired && !it.isCompleted }.take(2).forEach {
+        sessions.filter { it.isRequired && it.status != "COMPLETED" }.take(2).forEach {
             priorities.add("${it.title} (${it.durationMinutes} دقائق)")
         }
 
@@ -136,16 +188,20 @@ class DailyRoutineEngine(
         )
     }
 
+    suspend fun startSession(sessionId: String) {
+        routineRepo.markStarted(sessionId)
+    }
+
+    suspend fun completeSession(sessionId: String) {
+        routineRepo.markCompleted(sessionId)
+    }
+
+    suspend fun skipSession(sessionId: String) {
+        routineRepo.markSkipped(sessionId)
+    }
+
     suspend fun rescheduleMissedActivity(sessionId: String, newTimeHint: String): Boolean {
-        val session = routineRepo.getActiveMicroSessions().find { it.id == sessionId }
-        if (session != null) {
-            val rescheduled = session.copy(
-                scheduledAtTimeHint = newTimeHint,
-                isCompleted = false
-            )
-            routineRepo.saveSessions(listOf(rescheduled))
-            return true
-        }
-        return false
+        routineRepo.markRescheduled(sessionId, newTimeHint)
+        return true
     }
 }

@@ -66,6 +66,11 @@ import com.example.ui.theme.RafiqahRose
 import com.example.ui.theme.SageOlive
 import kotlinx.coroutines.delay
 
+enum class ReadingMode {
+    REQUIRED_TIME,
+    OPTIONAL_CONTINUATION
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReadingScreen(
@@ -73,22 +78,29 @@ fun ReadingScreen(
     onCompleteReading: (Long) -> Unit,
     onNavigateBack: () -> Unit,
     onSpeak: (String) -> Unit,
+    initialRequiredDurationSeconds: Int? = null,
     onSaveElapsedProgress: (elapsedSeconds: Int, isCompleted: Boolean) -> Unit = { _, _ -> },
+    onSaveDetailedProgress: (requiredElapsed: Int, optionalElapsed: Int, isCompleted: Boolean, quizUnderstood: Boolean?) -> Unit = { _, _, _, _ -> },
     onConceptEvaluated: (conceptKey: String, isUnderstood: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    // 10 minutes required = 600 seconds
-    var secondsLeft by remember { mutableIntStateOf(600) }
+    val totalRequiredSecs = (initialRequiredDurationSeconds ?: (contentItem?.estimatedMinutes?.times(60)) ?: 600).coerceAtLeast(60)
+    var currentMode by remember { mutableStateOf(ReadingMode.REQUIRED_TIME) }
+    var secondsLeftInPhase by remember(totalRequiredSecs) { mutableIntStateOf(totalRequiredSecs) }
+    var optionalSecondsElapsed by remember { mutableIntStateOf(0) }
     var isRunning by remember { mutableStateOf(true) }
-    var hasCompletedTarget by remember { mutableStateOf(false) }
-    var showExtensionDialog by remember { mutableStateOf(false) }
+    var hasCompletedRequired by remember { mutableStateOf(false) }
+    var showExtensionPrompt by remember { mutableStateOf(false) }
     var showQuiz by remember { mutableStateOf(false) }
     var quizAnswerRevealed by remember { mutableStateOf(false) }
     var conceptEvaluationDone by remember { mutableStateOf(false) }
+    var quizOutcome by remember { mutableStateOf<Boolean?>(null) }
+
+    val requiredElapsed = if (hasCompletedRequired) totalRequiredSecs else (totalRequiredSecs - secondsLeftInPhase).coerceAtLeast(0)
 
     val handleBackPress = {
-        val elapsed = (600 - secondsLeft).coerceAtLeast(0)
-        onSaveElapsedProgress(elapsed, hasCompletedTarget)
+        onSaveElapsedProgress(requiredElapsed + optionalSecondsElapsed, hasCompletedRequired)
+        onSaveDetailedProgress(requiredElapsed, optionalSecondsElapsed, hasCompletedRequired, quizOutcome)
         onNavigateBack()
     }
 
@@ -96,30 +108,40 @@ fun ReadingScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            val elapsed = (600 - secondsLeft).coerceAtLeast(0)
-            onSaveElapsedProgress(elapsed, hasCompletedTarget)
+            onSaveElapsedProgress(requiredElapsed + optionalSecondsElapsed, hasCompletedRequired)
+            onSaveDetailedProgress(requiredElapsed, optionalSecondsElapsed, hasCompletedRequired, quizOutcome)
         }
     }
 
-    LaunchedEffect(isRunning, secondsLeft) {
-        if (isRunning && secondsLeft > 0) {
+    LaunchedEffect(isRunning, secondsLeftInPhase, currentMode) {
+        if (isRunning) {
             delay(1000L)
-            secondsLeft--
-            if (secondsLeft == 0) {
-                hasCompletedTarget = true
-                showExtensionDialog = true
-                onCompleteReading(600L)
+            if (currentMode == ReadingMode.REQUIRED_TIME) {
+                if (secondsLeftInPhase > 0) {
+                    secondsLeftInPhase--
+                    if (secondsLeftInPhase == 0) {
+                        hasCompletedRequired = true
+                        showExtensionPrompt = true
+                        onCompleteReading(totalRequiredSecs.toLong())
+                    }
+                }
+            } else {
+                optionalSecondsElapsed++
             }
         }
     }
 
-    val minutes = secondsLeft / 60
-    val seconds = secondsLeft % 60
-    val timeFormatted = String.format("%02d:%02d", minutes, seconds)
-    val progress = (600f - secondsLeft) / 600f
+    val displayMinutes = if (currentMode == ReadingMode.REQUIRED_TIME) secondsLeftInPhase / 60 else optionalSecondsElapsed / 60
+    val displaySeconds = if (currentMode == ReadingMode.REQUIRED_TIME) secondsLeftInPhase % 60 else optionalSecondsElapsed % 60
+    val timeFormatted = String.format("%02d:%02d", displayMinutes, displaySeconds)
+    val progress = if (currentMode == ReadingMode.REQUIRED_TIME) {
+        (totalRequiredSecs.toFloat() - secondsLeftInPhase) / totalRequiredSecs.toFloat()
+    } else {
+        1f
+    }
 
     val title = contentItem?.title ?: "كيف يعمل قلبك؟ مضخة الحياة العجيبة"
-    val body = contentItem?.body ?: "القلب هو العضلة الأقوى والأوفى في جسم الإنسان. ينبض أكثر من 100 ألف مرة كل يوم بدون توقف، ليضخ الدم المحمل بالأكسجين والغذاء إلى كل خلية في الجسم. تخيلي يا أمي أن هذه العضلة الصغيرة التي بحجم قبضة اليد ترسل الدم عبر أوعية دموية طولها آلاف الكيلومترات! المشي الخفيف يومياً، وشرب الماء، والابتعاد عن التوتر هو أحسن هدية تقدمينها لقلبك ليظل ينبض بالصحة والنشاط."
+    val body = contentItem?.body ?: "القلب هو العضلة الأقوى والأوفى في جسم الإنسان. ينبض أكثر من 100 ألف مرة كل يوم بدون توقف..."
     val takeaway = contentItem?.keyTakeaway ?: "المشي وشرب الماء والنوم الهادئ يحافظ على صحة عضلة القلب وضغط دم متوازن."
     val question = contentItem?.quizQuestion ?: "كم مرة ينبض القلب تقريباً في اليوم؟"
     val answer = contentItem?.quizAnswer ?: "أكثر من 100 ألف مرة كل يوم."
@@ -130,7 +152,7 @@ fun ReadingScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "📖 جلسة القراءة الهادئة (10 دقائق)",
+                        text = if (currentMode == ReadingMode.OPTIONAL_CONTINUATION) "📖 استمرار اختياري (وقت إضافي)" else "📖 جلسة القراءة (${totalRequiredSecs / 60} دقائق)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -171,21 +193,25 @@ fun ReadingScreen(
                             CircularProgressIndicator(
                                 progress = { progress.coerceIn(0f, 1f) },
                                 modifier = Modifier.size(54.dp),
-                                color = if (hasCompletedTarget) SageOlive else RafiqahRose,
+                                color = if (hasCompletedRequired) SageOlive else RafiqahRose,
                                 strokeWidth = 4.dp,
                                 trackColor = Color.LightGray.copy(alpha = 0.3f)
                             )
                             Icon(
-                                imageVector = if (hasCompletedTarget) Icons.Default.CheckCircle else Icons.Default.AutoStories,
+                                imageVector = if (hasCompletedRequired) Icons.Default.CheckCircle else Icons.Default.AutoStories,
                                 contentDescription = null,
-                                tint = if (hasCompletedTarget) SageOlive else RafiqahRose,
+                                tint = if (hasCompletedRequired) SageOlive else RafiqahRose,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = if (hasCompletedTarget) "أتممتِ الـ10 دقائق بنجاح! 🌸" else "الوقت المتبقي للجلسة (مطلوب 10د)",
+                                text = if (hasCompletedRequired) {
+                                    if (currentMode == ReadingMode.OPTIONAL_CONTINUATION) "قراءة إضافية اختيارية 🌷" else "أتممتِ الوقت الإلزامي بنجاح! 🌸"
+                                } else {
+                                    "الوقت المتبقي للجلسة (${totalRequiredSecs / 60}د)"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -275,8 +301,8 @@ fun ReadingScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Extension / Completion Actions
-            if (hasCompletedTarget) {
+            // Extension / Continuation Prompt
+            if (hasCompletedRequired) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = SageOlive.copy(alpha = 0.15f)),
                     shape = RoundedCornerShape(16.dp),
@@ -287,40 +313,52 @@ fun ReadingScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "🎉 يعطيك الصحة يا أمي! أتممتِ جلسة القراءة اليومية كاملة.",
+                            text = "🎉 يعطيك الصحة يا أمي! أتممتِ الوقت المطلوب (${totalRequiredSecs / 60}د).",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "تحبي تمددي 5 دقايق إضافية اختيارية، ولا نعملو سؤال خفيف يثبت المعلومة؟",
+                            text = "تحب تكمل شوية ولا نكتفي بهذا؟",
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            if (currentMode != ReadingMode.OPTIONAL_CONTINUATION) {
+                                Button(
+                                    onClick = {
+                                        currentMode = ReadingMode.OPTIONAL_CONTINUATION
+                                        isRunning = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = SageOlive),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.MoreTime, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("نكمل شوية 📖")
+                                }
+                            }
                             Button(
-                                onClick = {
-                                    secondsLeft += 300
-                                    hasCompletedTarget = false
-                                    isRunning = true
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = SageOlive)
+                                onClick = { handleBackPress() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.MoreTime, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("+ 5 دقايق إضافية")
+                                Icon(Icons.Default.CheckCircle, contentDescription = null)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("نكتفي بهذا 🌷")
                             }
                             Button(
                                 onClick = { showQuiz = !showQuiz },
-                                colors = ButtonDefaults.buttonColors(containerColor = RafiqahRose)
+                                colors = ButtonDefaults.buttonColors(containerColor = RafiqahRose),
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.QuestionAnswer, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text("سؤال الفهم")
                             }
                         }
@@ -375,6 +413,7 @@ fun ReadingScreen(
                                     Button(
                                         onClick = {
                                             conceptEvaluationDone = true
+                                            quizOutcome = true
                                             onConceptEvaluated(relatedConcept, true)
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = SageOlive)
@@ -386,6 +425,7 @@ fun ReadingScreen(
                                     OutlinedButton(
                                         onClick = {
                                             conceptEvaluationDone = true
+                                            quizOutcome = false
                                             onConceptEvaluated(relatedConcept, false)
                                         }
                                     ) {

@@ -72,12 +72,19 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     val reminderScheduler = com.example.service.reminder.ReminderScheduler(application)
 
     val spacedRepetitionEngine = com.example.ai.learning.SpacedRepetitionEngine(learningProgressRepo)
+    val contentSelectionEngine = com.example.ai.learning.ContentSelectionEngine(
+        contentRepo = contentRepo,
+        contentDao = db.contentDao(),
+        learningRepo = learningProgressRepo,
+        spacedRepetition = spacedRepetitionEngine
+    )
     val dailyRoutineEngine = com.example.ai.routine.DailyRoutineEngine(
         routineRepo = routineRepo,
         healthRepo = healthRepo,
         reminderRepo = reminderRepo,
         learningRepo = learningProgressRepo,
-        spacedRepetition = spacedRepetitionEngine
+        spacedRepetition = spacedRepetitionEngine,
+        contentSelectionEngine = contentSelectionEngine
     )
 
     // Gemini Authentication Abstraction & Secure Store (V2.6)
@@ -198,9 +205,43 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     val liveTranscript: StateFlow<String> = liveVoiceService.liveTranscript
     val isLiveSessionActive: StateFlow<Boolean> = liveVoiceService.isSessionActive
 
+    // Dynamically selected reading content via ContentSelectionEngine (never arbitrary firstOrNull)
+    private val _selectedReadingContent = MutableStateFlow<com.example.data.local.entity.ContentItemEntity?>(null)
+    val selectedReadingContent: StateFlow<com.example.data.local.entity.ContentItemEntity?> = _selectedReadingContent.asStateFlow()
+
+    fun prepareReadingContent(conceptKey: String? = null) {
+        viewModelScope.launch {
+            val content = contentSelectionEngine.selectContentForSession(
+                sessionType = "READING",
+                preferredConceptKey = conceptKey
+            )
+            _selectedReadingContent.value = content
+        }
+    }
+
     // Pending natural confirmation for sensitive actions
     private val _pendingConfirmation = MutableStateFlow<PendingActionConfirmation?>(null)
     val pendingConfirmation: StateFlow<PendingActionConfirmation?> = _pendingConfirmation.asStateFlow()
+
+    fun requestActionConfirmation(
+        title: String,
+        description: String,
+        onConfirm: () -> Unit,
+        onReject: () -> Unit = {}
+    ) {
+        _pendingConfirmation.value = PendingActionConfirmation(
+            title = title,
+            description = description,
+            onConfirmAction = {
+                onConfirm()
+                _pendingConfirmation.value = null
+            },
+            onRejectAction = {
+                onReject()
+                _pendingConfirmation.value = null
+            }
+        )
+    }
 
     // Pending approval for sensitive memory items (e.g. medical conditions / medications)
     private val _pendingMemoryApproval = MutableStateFlow<MemoryManager.MemoryCandidate?>(null)
@@ -221,6 +262,8 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             AppDatabase.seedInitialData(db)
+            dailyRoutineEngine.generateOrRefreshDailyPlan()
+            prepareReadingContent()
         }
         // Collect live tool events for logging and UI awareness
         viewModelScope.launch {
@@ -500,19 +543,36 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun startFocusSession(minutes: Int, activityTitle: String) {
-        viewModelScope.launch {
-            focusRepo.startFocusSession(minutes, activityTitle, 1)
-            appBlockingController.activateFocusBlocking()
+    fun startFocusSession(minutes: Int, activityTitle: String, requireConfirmation: Boolean = false) {
+        val action = {
+            viewModelScope.launch {
+                focusRepo.startFocusSession(minutes, activityTitle, 1)
+                appBlockingController.activateFocusBlocking()
+            }
+        }
+        if (requireConfirmation) {
+            requestActionConfirmation(
+                title = "بدء جلسة تركيز مع حجب التطبيقات",
+                description = "هل تودين بدء جلسة تركيز لمدة $minutes دقيقة؟ سيتم حجب التطبيقات المحددة للمساعدة على الهدوء والتركيز.",
+                onConfirm = { action() }
+            )
+        } else {
+            action()
         }
     }
 
-    fun endFocusSession() {
+    fun endFocusSession(interrupted: Boolean = false, elapsedSeconds: Int = 0) {
         viewModelScope.launch {
             appBlockingController.deactivateFocusBlocking()
             val active = focusRepo.getActiveFocusSession()
             if (active != null) {
-                focusRepo.completeFocusSession(active.id, active.targetDurationMinutes * 60)
+                val duration = if (elapsedSeconds > 0) elapsedSeconds else active.targetDurationMinutes * 60
+                focusRepo.completeFocusSession(
+                    id = active.id,
+                    actualSecs = duration,
+                    completedSuccessfully = !interrupted,
+                    interrupted = interrupted
+                )
             }
         }
     }
@@ -524,15 +584,60 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun saveReadingProgress(contentId: String, elapsedSeconds: Int, isCompleted: Boolean) {
+    fun startRoutineSession(sessionId: String) {
         viewModelScope.launch {
-            contentRepo.recordReadingProgress(contentId, elapsedSeconds, isCompleted)
+            dailyRoutineEngine.startSession(sessionId)
+        }
+    }
+
+    fun completeRoutineSession(sessionId: String) {
+        viewModelScope.launch {
+            dailyRoutineEngine.completeSession(sessionId)
+        }
+    }
+
+    fun skipRoutineSession(sessionId: String) {
+        viewModelScope.launch {
+            dailyRoutineEngine.skipSession(sessionId)
+        }
+    }
+
+    fun saveDetailedReadingProgress(
+        contentId: String,
+        requiredElapsed: Int,
+        optionalElapsed: Int,
+        isCompleted: Boolean,
+        quizUnderstood: Boolean?
+    ) {
+        viewModelScope.launch {
+            val totalElapsed = requiredElapsed + optionalElapsed
+            contentRepo.recordReadingProgress(
+                contentId = contentId,
+                elapsedSeconds = totalElapsed,
+                isCompleted = isCompleted
+            )
             if (isCompleted) {
                 routineRepo.getActiveMicroSessions().find { it.contentId == contentId }?.let {
-                    routineRepo.markCompleted(it.id)
+                    dailyRoutineEngine.completeSession(it.id)
                 }
             }
+            if (quizUnderstood != null) {
+                val content = contentRepo.getContentById(contentId)
+                val conceptKey = content?.relatedConceptKey ?: "reading_concept"
+                spacedRepetitionEngine.recordAttempt(conceptKey, quizUnderstood)
+                val statusText = if (quizUnderstood) "أتقنت أمي مفهوم" else "يحتاج مفهوم"
+                memoryRepo.saveMemoryWithDeduplication(
+                    content = "$statusText $conceptKey من جلسة القراءة.",
+                    category = MemoryCategory.LEARNING,
+                    importance = 4,
+                    source = "اختبار الفهم بجلسة القراءة"
+                )
+            }
         }
+    }
+
+    fun saveReadingProgress(contentId: String, elapsedSeconds: Int, isCompleted: Boolean) {
+        saveDetailedReadingProgress(contentId, elapsedSeconds, 0, isCompleted, null)
     }
 
     fun evaluateConceptFromReading(conceptKey: String, isUnderstood: Boolean) {

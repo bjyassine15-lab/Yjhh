@@ -54,20 +54,35 @@ interface RoutineDao {
     @Query("SELECT * FROM micro_sessions WHERE isCompleted = 0 AND isSkipped = 0 ORDER BY priority ASC")
     suspend fun getActiveMicroSessions(): List<MicroSessionEntity>
 
+    @Query("SELECT * FROM micro_sessions WHERE dateKey = :dateKey ORDER BY priority ASC")
+    suspend fun getSessionsForDate(dateKey: String): List<MicroSessionEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateSessions(sessions: List<MicroSessionEntity>)
 
-    @Query("UPDATE micro_sessions SET isCompleted = :completed, completedAt = :time WHERE id = :id")
-    suspend fun markCompleted(id: String, completed: Boolean, time: Long = System.currentTimeMillis())
+    @Query("UPDATE micro_sessions SET status = :status WHERE id = :id")
+    suspend fun updateStatus(id: String, status: String)
 
-    @Query("UPDATE micro_sessions SET isSkipped = 1 WHERE id = :id")
+    @Query("UPDATE micro_sessions SET status = 'STARTED' WHERE id = :id")
+    suspend fun markStarted(id: String)
+
+    @Query("UPDATE micro_sessions SET status = 'COMPLETED', isCompleted = :completed, completedAt = :time WHERE id = :id")
+    suspend fun markCompleted(id: String, completed: Boolean = true, time: Long = System.currentTimeMillis())
+
+    @Query("UPDATE micro_sessions SET status = 'SKIPPED', isSkipped = 1 WHERE id = :id")
     suspend fun markSkipped(id: String)
+
+    @Query("UPDATE micro_sessions SET status = 'RESCHEDULED', scheduledAtTimeHint = :newTimeHint WHERE id = :id")
+    suspend fun markRescheduled(id: String, newTimeHint: String)
 }
 
 @Dao
 interface ContentDao {
     @Query("SELECT * FROM content_items")
     fun getAllContentFlow(): Flow<List<ContentItemEntity>>
+
+    @Query("SELECT * FROM content_items")
+    suspend fun getAllContentItems(): List<ContentItemEntity>
 
     @Query("SELECT * FROM content_items WHERE id = :id")
     suspend fun getContentById(id: String): ContentItemEntity?
@@ -77,6 +92,9 @@ interface ContentDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertContentItems(items: List<ContentItemEntity>)
+
+    @Query("SELECT * FROM reading_sessions ORDER BY id DESC LIMIT :limit")
+    suspend fun getRecentReadingSessions(limit: Int = 10): List<ReadingSessionEntity>
 
     @Query("SELECT * FROM reading_sessions ORDER BY id DESC LIMIT 1")
     fun getLatestReadingSessionFlow(): Flow<ReadingSessionEntity?>

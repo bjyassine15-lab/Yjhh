@@ -121,27 +121,27 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         suspend fun seedInitialData(database: AppDatabase) {
-            // Seed profile
+            // Seed profile with neutral initial state (no fake age or medical assumptions)
             database.profileDao().insertOrUpdateProfile(
                 ProfileEntity(
                     id = 1,
                     name = "أمي الحبيبة",
-                    age = 53,
+                    age = 0,
                     preferredLanguage = "العربية - التونسية المبسطة",
                     speakingStyle = "حنون، هادئ ومبسط",
                     medicineKnowledgeLevel = "مبتدئة محبة للتعلم",
-                    scienceLevel = "معرفة عامة طيبة",
+                    scienceLevel = "معرفة عامة",
                     frenchLevel = "تونسية يومية",
-                    lastLessonTitle = "الخلية: مدينة الحياة العجيبة",
+                    lastLessonTitle = "بداية الرحلة التعليمية",
                     lastChapterNumber = 1,
-                    progressPercent = 20,
-                    heightCm = 162f,
-                    weightKg = 68f,
-                    dailyActivity = "مشي خفيف وأشغال البيت",
-                    sleepQuality = "نوم متقطع أحيانًا",
-                    studyTime = "المساء بعد المغرب",
-                    restTimes = "القيلولة بعد الظهر",
-                    sessionDurationMinutes = 7
+                    progressPercent = 0,
+                    heightCm = 0f,
+                    weightKg = 0f,
+                    dailyActivity = "",
+                    sleepQuality = "",
+                    studyTime = "",
+                    restTimes = "",
+                    sessionDurationMinutes = 10
                 )
             )
 
@@ -149,7 +149,7 @@ abstract class AppDatabase : RoomDatabase() {
             database.memoryDao().insertMemory(
                 MemoryEntity(
                     category = "USER_FACT",
-                    content = "أمي عمرها 53 سنة، تحب الهدوء، وتتعلم أحسن كي نعطيوها أمثلة من الكوجينة والدار والواقع التونسي.",
+                    content = "تحب الهدوء، وتتعلم أحسن كي نعطيوها أمثلة من الكوجينة والدار والواقع التونسي.",
                     importance = 5,
                     source = "ملف شخصي مؤسس"
                 )
@@ -331,41 +331,25 @@ abstract class AppDatabase : RoomDatabase() {
                 database.learningProgressDao().insertAll(initialConcepts)
             }
 
-            // Seed Health Profile V3
+            // Seed Health Profile V3 as neutral (awaiting user onboarding / conversation)
             if (database.healthDao().getHealthProfile() == null) {
                 database.healthDao().insertOrUpdateHealthProfile(
                     HealthProfileEntity(
                         id = 1,
-                        age = 53,
-                        sleepQuality = "طبيعي ومريح",
-                        sleepTimeHint = "23:00",
-                        wakeTimeHint = "07:00",
-                        activityLevel = "نشاط يومي معتدل ومشي خفيف",
-                        waterIntakeGoalGlasses = 6,
-                        currentWaterGlasses = 3,
-                        dietaryHabits = "أكل منزلي متوازن وصحي",
-                        generalGoals = "الحفاظ على النشاط وشرب الماء بانتظام"
-                    )
-                )
-                database.healthDao().insertHabit(
-                    HabitEntity(
-                        title = "شرب كأس ماء كبير على الصباح",
-                        targetFrequency = "DAILY",
-                        timeHint = "07:30",
-                        streakDays = 3
-                    )
-                )
-                database.healthDao().insertHabit(
-                    HabitEntity(
-                        title = "مشي خفيف 15 دقيقة بعد العصر",
-                        targetFrequency = "DAILY",
-                        timeHint = "17:00",
-                        streakDays = 2
+                        age = 0,
+                        sleepQuality = "",
+                        sleepTimeHint = "",
+                        wakeTimeHint = "",
+                        activityLevel = "",
+                        waterIntakeGoalGlasses = 0,
+                        currentWaterGlasses = 0,
+                        dietaryHabits = "",
+                        generalGoals = ""
                     )
                 )
             }
 
-            // Seed Educational Content Items for Reading Session
+            // Seed Diverse Educational Content Items for Reading Session across categories
             database.contentDao().insertContentItems(
                 listOf(
                     ContentItemEntity(
@@ -391,6 +375,39 @@ abstract class AppDatabase : RoomDatabase() {
                         quizAnswer = "حماية الخلية وتنظيم دخول الغذاء وخروج الفضلات كحارس ذكي."
                     ),
                     ContentItemEntity(
+                        id = "content_mitochondria_energy",
+                        category = "SCIENCE",
+                        title = "الميتوكوندريا: محطات توليد الطاقة الحية",
+                        body = "داخل كل خلية مصانع صغيرة مجهرية تسمى الميتوكوندريا. دورها الأساسي أخذ الغذاء والأكسجين وتحويلهما إلى طاقة حية نقية تمكننا من الحركة والتفكير والدفء. عندما تتغذين بوعي وتتنفسين هواء نقياً، فإنك تزودين مصانع الطاقة بما تحتاجه لتظل نشطة وقوية.",
+                        estimatedMinutes = 8,
+                        keyTakeaway = "الميتوكوندريا تحول الغذاء والأكسجين إلى طاقة حيوية للجسم.",
+                        relatedConceptKey = "mitochondria",
+                        quizQuestion = "ماذا تنتج الميتوكوندريا داخل الخلية؟",
+                        quizAnswer = "تنتج الطاقة الحيوية اللازمة لحركة ونشاط الجسم."
+                    ),
+                    ContentItemEntity(
+                        id = "content_hydration_importance",
+                        category = "HEALTH_EDUCATION",
+                        title = "سر الماء: نضارة العقل وحيوية المفاصل",
+                        body = "يمثل الماء أكثر من ستين بالمائة من وزن جسم الإنسان. كل قطرة ماء تشربينها تساعد الكليتين على تنقية الدم، وترطب المفاصل لتسهيل الحركة، وتمنح الدماغ الصفاء والانتباه. شرب الماء بانتظام طوال اليوم، دون انتظار الشعور بالعطش الشديد، عادة ذهبية لصحة مديدة.",
+                        estimatedMinutes = 7,
+                        keyTakeaway = "شرب الماء بانتظام ينشط الكليتين والمفاصل ويمنح الذهن صفاءً مستمراً.",
+                        relatedConceptKey = "hydration",
+                        quizQuestion = "لماذا ينصح بشرب الماء بانتظام دون انتظار العطش؟",
+                        quizAnswer = "لأن العطش إشارة متأخرة، والانتظام يحافظ على ترطيب المفاصل وتنقية الدم."
+                    ),
+                    ContentItemEntity(
+                        id = "content_ibn_al_jazzar",
+                        category = "HISTORY",
+                        title = "ابن الجزار القيرواني: رائد الطب التونسي الأصيل",
+                        body = "في مدينة القيروان التاريخية، عاش الطبيب التونسي العظيم أحمد بن الجزار في القرن الرابع الهجري. كان ابن الجزار يُعرف بـ 'طبيب الفقراء'، حيث كان يعالج الناس برأفة ودون مقابل، وألف كتاب 'زاد المسافر' الذي تُرجم إلى اللاتينية ودُرّس في جامعات أوروبا لقرون. تاريخنا الطبي حافل بالإنسانية والعلم النيّر.",
+                        estimatedMinutes = 10,
+                        keyTakeaway = "ابن الجزار طبيب تونسي رائد أرسى قيم التطبيب الإنساني ورعاية صحة الجميع.",
+                        relatedConceptKey = "history_medicine",
+                        quizQuestion = "في أي مدينة تونسية عاش الطبيب ابن الجزار؟",
+                        quizAnswer = "في مدينة القيروان التاريخية."
+                    ),
+                    ContentItemEntity(
                         id = "content_olive_tree",
                         category = "CULTURE",
                         title = "شجرة الزيتون المباركة في تونس",
@@ -400,6 +417,17 @@ abstract class AppDatabase : RoomDatabase() {
                         relatedConceptKey = "nutrition",
                         quizQuestion = "ما الفائدة الصحية الأساسية لزيت الزيتون الطبيعي؟",
                         quizAnswer = "حماية شرايين القلب وخلايا الجسم بمضادات الأكسدة الطبيعية."
+                    ),
+                    ContentItemEntity(
+                        id = "content_french_daily",
+                        category = "FRENCH",
+                        title = "Santé et Bien-être: عادات العافية بالفرنسية",
+                        body = "في تونس نستخدم مصطلحات فرنسية يومية في الحديث عن العافية، مثل 'Une promenade' (فسحة مشي)، و'Bien dormir' (نوم هادئ)، و'Prendre soin de soi' (الاعتناء بالنفس). الربط بين الكلمة الفرنسية وسياقها الدافئ يجعل التعلم سلساً وطبيعياً.",
+                        estimatedMinutes = 6,
+                        keyTakeaway = "التعلم بالربط بين الكلمات الفرنسية والعادات اليومية يعزز الحفظ الممتع.",
+                        relatedConceptKey = "french_wellness",
+                        quizQuestion = "ما معنى 'Une promenade' في السياق اليومي؟",
+                        quizAnswer = "فسحة مشي خفيفة للترويح والنشاط."
                     )
                 )
             )

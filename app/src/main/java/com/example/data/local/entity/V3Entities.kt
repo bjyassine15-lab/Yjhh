@@ -9,15 +9,15 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "health_profiles")
 data class HealthProfileEntity(
     @PrimaryKey val id: Int = 1,
-    val age: Int = 54,
-    val sleepQuality: String = "عادي",
-    val sleepTimeHint: String = "23:00",
-    val wakeTimeHint: String = "07:00",
-    val activityLevel: String = "نشاط خفيف",
-    val waterIntakeGoalGlasses: Int = 6,
+    val age: Int = 0, // 0 = unconfigured
+    val sleepQuality: String = "",
+    val sleepTimeHint: String = "",
+    val wakeTimeHint: String = "",
+    val activityLevel: String = "",
+    val waterIntakeGoalGlasses: Int = 0,
     val currentWaterGlasses: Int = 0,
-    val dietaryHabits: String = "أكل منزلي تونسي معتدل",
-    val generalGoals: String = "المشي يومياً وشرب الماء بانتظام",
+    val dietaryHabits: String = "",
+    val generalGoals: String = "",
     val lastUpdated: Long = System.currentTimeMillis()
 )
 
@@ -50,6 +50,7 @@ data class HabitEntity(
 
 /**
  * Scheduled micro-sessions and required routine items (V3).
+ * Status transitions: PLANNED -> STARTED -> COMPLETED / SKIPPED / RESCHEDULED
  */
 @Entity(tableName = "micro_sessions")
 data class MicroSessionEntity(
@@ -61,6 +62,9 @@ data class MicroSessionEntity(
     val isRequired: Boolean = true,
     val isCompleted: Boolean = false,
     val isSkipped: Boolean = false,
+    val status: String = "PLANNED", // PLANNED, STARTED, COMPLETED, SKIPPED, RESCHEDULED
+    val dateKey: String = "", // e.g. "2026-09-11" to preserve and reload today's routine
+    val requiredDurationSeconds: Int = 600,
     val priority: Int = 1,
     val relatedConceptKey: String? = null,
     val contentId: String? = null,
@@ -110,6 +114,7 @@ data class FocusSessionEntity(
     val actualElapsedSeconds: Int = 0,
     val focusActivityTitle: String = "قراءة هادئة وتركيز",
     val completedSuccessfully: Boolean = false,
+    val interrupted: Boolean = false,
     val blockingLevel: Int = 0, // 0 = timer only, 1 = usage monitoring, 2 = system restrictions
     val startedAt: Long = System.currentTimeMillis(),
     val endedAt: Long = 0L

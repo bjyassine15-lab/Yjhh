@@ -61,10 +61,12 @@ import kotlinx.coroutines.delay
 fun FocusSessionScreen(
     onNavigateBack: () -> Unit,
     onSpeak: (String) -> Unit,
-    onSessionFinished: () -> Unit,
+    onSessionFinished: (elapsedSeconds: Int) -> Unit,
+    onSessionInterrupted: (elapsedSeconds: Int) -> Unit = {},
     targetDurationMinutes: Int = 15,
     activityTitle: String = "جلسة تركيز وقراءة هادئة",
-    blockingStatusMessage: String? = null,
+    blockingStatus: com.example.service.focus.BlockingStatus? = null,
+    onRequestUsagePermission: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val totalSeconds = (targetDurationMinutes.coerceAtLeast(1) * 60).toFloat()
@@ -72,12 +74,14 @@ fun FocusSessionScreen(
     var isRunning by remember { mutableStateOf(true) }
     var currentStep by remember { mutableIntStateOf(1) } // 1: Story, 2: Visual, 3: Recap
 
+    val elapsedSeconds = (totalSeconds.toInt() - secondsLeft).coerceAtLeast(0)
+
     LaunchedEffect(isRunning, secondsLeft) {
         if (isRunning && secondsLeft > 0) {
             delay(1000L)
             secondsLeft--
             if (secondsLeft == 0) {
-                onSessionFinished()
+                onSessionFinished(totalSeconds.toInt())
             }
         }
     }
@@ -98,7 +102,12 @@ fun FocusSessionScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        if (secondsLeft > 0) {
+                            onSessionInterrupted(elapsedSeconds)
+                        }
+                        onNavigateBack()
+                    }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "رجوع"
@@ -116,7 +125,7 @@ fun FocusSessionScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(20.dp),
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -143,29 +152,53 @@ fun FocusSessionScreen(
                 )
             }
 
-            // Real App Blocking Policy Status Card
-            if (!blockingStatusMessage.isNullOrBlank()) {
+            // Real App Blocking Policy Status Card (Honest UI: ACTIVE vs TIMER_ONLY)
+            if (blockingStatus != null) {
+                val isTimerOnly = blockingStatus.focusBlockingMode == com.example.service.focus.FocusBlockingMode.TIMER_ONLY
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SageOlive.copy(alpha = 0.12f)),
-                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isTimerOnly) MaterialTheme.colorScheme.surfaceVariant else SageOlive.copy(alpha = 0.15f)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "حماية التركيز",
-                            tint = SageOlive,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = "حماية التركيز",
+                                tint = if (isTimerOnly) MaterialTheme.colorScheme.onSurfaceVariant else SageOlive,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isTimerOnly) "وضع المؤقت الهادئ (TIMER_ONLY) ⏱️" else "حماية التركيز نشطة (ACTIVE) 🛡️",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = blockingStatusMessage,
+                            text = blockingStatus.explanationNote,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (blockingStatus.state == com.example.service.focus.BlockingState.NOT_CONFIGURED && onRequestUsagePermission != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = onRequestUsagePermission,
+                                colors = ButtonDefaults.buttonColors(containerColor = RafiqahRose),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "تفعيل صلاحية الاستخدام من الإعدادات ⚙️",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -269,7 +302,7 @@ fun FocusSessionScreen(
                         } else {
                             Button(
                                 onClick = {
-                                    onSessionFinished()
+                                    onSessionFinished(totalSeconds.toInt())
                                     onNavigateBack()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = SageOlive),
@@ -305,7 +338,11 @@ fun FocusSessionScreen(
 
                 Button(
                     onClick = {
-                        onSessionFinished()
+                        if (secondsLeft > 0) {
+                            onSessionInterrupted(elapsedSeconds)
+                        } else {
+                            onSessionFinished(totalSeconds.toInt())
+                        }
                         onNavigateBack()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),

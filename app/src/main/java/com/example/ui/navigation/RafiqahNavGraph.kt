@@ -1,9 +1,16 @@
 package com.example.ui.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -56,11 +63,12 @@ fun RafiqahNavGraph(
     val geminiConnectionStatus by viewModel.geminiConnectionStatus.collectAsState()
     val maskedApiKey by viewModel.maskedApiKey.collectAsState()
 
-    NavHost(
-        navController = navController,
-        startDestination = startDestination,
-        modifier = modifier
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = startDestination,
+            modifier = Modifier.fillMaxSize()
+        ) {
         composable(RafiqahDestinations.HOME) {
             HomeScreen(
                 profile = profile,
@@ -112,6 +120,7 @@ fun RafiqahNavGraph(
         }
 
         composable(RafiqahDestinations.FOCUS_SESSION) {
+            val context = LocalContext.current
             val activeFocusSession by viewModel.focusRepo.getActiveFocusSessionFlow().collectAsState(initial = null)
             val blockingStatus by viewModel.appBlockingStatus.collectAsState()
             val targetMinutes = activeFocusSession?.targetDurationMinutes ?: 15
@@ -120,32 +129,52 @@ fun RafiqahNavGraph(
             FocusSessionScreen(
                 targetDurationMinutes = targetMinutes,
                 activityTitle = actTitle,
-                blockingStatusMessage = blockingStatus.statusMessage,
+                blockingStatus = blockingStatus,
                 onNavigateBack = {
-                    viewModel.endFocusSession()
+                    viewModel.endFocusSession(interrupted = true)
                     navController.popBackStack()
                 },
                 onSpeak = { viewModel.speakText(it) },
-                onSessionFinished = {
-                    viewModel.endFocusSession()
+                onSessionFinished = { elapsed ->
+                    viewModel.endFocusSession(interrupted = false, elapsedSeconds = elapsed)
                     viewModel.saveLearningProgress("جلسة تركيز: $actTitle", true)
+                },
+                onSessionInterrupted = { elapsed ->
+                    viewModel.endFocusSession(interrupted = true, elapsedSeconds = elapsed)
+                },
+                onRequestUsagePermission = {
+                    val intent = viewModel.appBlockingController.getUsageAccessSettingsIntent()
+                    context.startActivity(intent)
                 }
             )
         }
 
         composable(RafiqahDestinations.READING) {
+            val dynamicReadingItem by viewModel.selectedReadingContent.collectAsState()
             val contentList by viewModel.allContentItems.collectAsState()
-            val firstItem = contentList.firstOrNull()
+            val activeItem = dynamicReadingItem ?: contentList.firstOrNull()
+
             com.example.ui.reading.ReadingScreen(
-                contentItem = firstItem,
+                contentItem = activeItem,
                 onCompleteReading = { secs ->
-                    firstItem?.let { item ->
+                    activeItem?.let { item ->
                         viewModel.saveReadingProgress(item.id, secs.toInt(), true)
                     }
                 },
                 onSaveElapsedProgress = { elapsed, completed ->
-                    firstItem?.let { item ->
+                    activeItem?.let { item ->
                         viewModel.saveReadingProgress(item.id, elapsed, completed)
+                    }
+                },
+                onSaveDetailedProgress = { requiredElapsed, optionalElapsed, isCompleted, quizUnderstood ->
+                    activeItem?.let { item ->
+                        viewModel.saveDetailedReadingProgress(
+                            contentId = item.id,
+                            requiredElapsed = requiredElapsed,
+                            optionalElapsed = optionalElapsed,
+                            isCompleted = isCompleted,
+                            quizUnderstood = quizUnderstood
+                        )
                     }
                 },
                 onConceptEvaluated = { conceptKey, isUnderstood ->
@@ -219,4 +248,24 @@ fun RafiqahNavGraph(
             )
         }
     }
+
+    // Global Confirmation Dialog for Sensitive Actions
+    pendingConfirmation?.let { conf ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPendingAction() },
+            title = { Text(text = conf.title) },
+            text = { Text(text = conf.description) },
+            confirmButton = {
+                Button(onClick = { viewModel.confirmPendingAction() }) {
+                    Text("تأكيد ومتابعة")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissPendingAction() }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+}
 }
