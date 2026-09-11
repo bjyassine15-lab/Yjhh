@@ -1,5 +1,6 @@
 package com.example.ai.tools
 
+import com.example.ai.learning.FrenchLessonGenerator
 import com.example.data.repository.DailyPlannerRepository
 import com.example.data.repository.FrenchWordRepository
 import com.example.data.repository.MemoryRepository
@@ -254,9 +255,34 @@ object AIToolRegistry {
                 put("properties", JSONObject().apply {
                     put("title", buildParam("STRING", "نص التذكير، مثلا: شرب الماء، موعد الطبيب، قراءة"))
                     put("timeExpression", buildParam("STRING", "التعبير الزمني، مثلا: غدوة على الثمانية، بعد ساعتين"))
-                    put("category", buildParam("STRING", "التصنيف: MEDICINE, APPOINTMENT, WATER, READING, GENERAL"))
-                    put("isRecurring", buildParam("BOOLEAN", "هل التذكير متكرر بانتظام (افتراضي: false)"))
-                    put("recurrenceRule", buildParam("STRING", "قاعدة التكرار: DAILY, WEEKLY"))
+                    put(
+                        "category",
+                        buildParam(
+                            "STRING",
+                            "MEDICINE, APPOINTMENT, WATER, READING, LEARNING, FRENCH, FOCUS, HEALTH, GENERAL"
+                        )
+                    )
+                    put(
+                        "isRecurring",
+                        buildParam(
+                            "BOOLEAN",
+                            "هل التذكير متكرر؟ إذا لم يذكر المستخدم التكرار استخدم false."
+                        )
+                    )
+                    put(
+                        "recurrenceRule",
+                        buildParam(
+                            "STRING",
+                            "NONE, DAILY, WEEKLY"
+                        )
+                    )
+                    put(
+                        "destination",
+                        buildParam(
+                            "STRING",
+                            "planner, reading, learning, french, focus, health"
+                        )
+                    )
                 })
                 put("required", JSONArray().apply { put("title"); put("timeExpression") })
             }
@@ -302,13 +328,67 @@ object AIToolRegistry {
             parametersSchema = JSONObject().apply {
                 put("type", "OBJECT")
                 put("properties", JSONObject().apply {
-                    put("name", buildParam("STRING", "الاسم إذا ذكرته أمي"))
-                    put("age", buildParam("INTEGER", "العمر إذا ذكرته أمي"))
-                    put("dialect", buildParam("STRING", "اللهجة المفضلة"))
-                    put("healthStatus", buildParam("STRING", "الحالة الصحية العامة"))
-                    put("primaryGoal", buildParam("STRING", "الهدف الأساسي"))
-                    put("dailyActivity", buildParam("STRING", "النشاط اليومي أو العادات"))
-                    put("sleepQuality", buildParam("STRING", "طبيعة النوم وأوقاته"))
+                    put(
+                        "name",
+                        buildParam("STRING", "الاسم الذي تفضّل الأم أن نناديها به")
+                    )
+
+                    put(
+                        "age",
+                        buildParam("INTEGER", "العمر إذا ذكرته الأم")
+                    )
+
+                    put(
+                        "generalLocation",
+                        buildParam(
+                            "STRING",
+                            "المدينة أو المنطقة العامة فقط، وليس عنوان المنزل"
+                        )
+                    )
+
+                    put(
+                        "dialect",
+                        buildParam("STRING", "اللهجة أو أسلوب اللغة المفضل")
+                    )
+
+                    put(
+                        "primaryGoal",
+                        buildParam("STRING", "الهدف الرئيسي الذي صرحت به الأم")
+                    )
+
+                    put(
+                        "dailyActivity",
+                        buildParam("STRING", "النشاط اليومي أو الحركة")
+                    )
+
+                    put(
+                        "sleepQuality",
+                        buildParam("STRING", "جودة النوم أو الروتين الليلي")
+                    )
+
+                    put(
+                        "learningGoals",
+                        buildParam(
+                            "STRING",
+                            "أهداف التعلم مفصولة بفواصل، مثال: طب, فرنسية, فيزياء"
+                        )
+                    )
+
+                    put(
+                        "learningInterests",
+                        buildParam(
+                            "STRING",
+                            "مواضيع التعلم المفضلة مفصولة بفواصل"
+                        )
+                    )
+
+                    put(
+                        "readingPreferences",
+                        buildParam(
+                            "STRING",
+                            "أنواع القراءة المفضلة مفصولة بفواصل"
+                        )
+                    )
                 })
             }
         ),
@@ -325,7 +405,6 @@ object AIToolRegistry {
                     put("examplePhrase", buildParam("STRING", "مثال عملي في جملة يومية"))
                     put("category", buildParam("STRING", "التصنيف: PHARMACY, MEDICAL, DAILY_LIFE"))
                 })
-                put("required", JSONArray().apply { put("frenchWord"); put("phoneticArabic") })
             }
         ),
         ToolDefinition(
@@ -421,6 +500,15 @@ open class ToolExecutor(
         }
     }
 
+    private fun parseCommaSeparated(value: Any?): List<String> {
+        return value
+            ?.toString()
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+    }
+
     open suspend fun executeTool(toolName: String, arguments: Map<String, Any?>): String {
         return try {
             when (toolName) {
@@ -486,26 +574,24 @@ open class ToolExecutor(
                 }
 
                 "save_health_note" -> {
-                    val note = arguments["note"]?.toString() ?: return "خطأ: نص الملاحظة فارغ"
-                    val cat = arguments["category"]?.toString() ?: "WELLNESS"
-                    val obsId = healthRepo?.addObservation(note, cat) ?: 0L
-                    memoryRepo.saveMemoryWithDeduplication(note, MemoryCategory.HEALTH, 4, "ملاحظة صحية من المحادثة")
+                    val note =
+                        arguments["note"]
+                            ?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: return "خطأ: نص الملاحظة فارغ"
 
-                    // Reflection on habit if user expressed desire for activity or sleep adjustments
-                    if (note.contains("نتحرك") || note.contains("مشي") || note.contains("حركة")) {
-                        healthRepo?.addHabit("مشي خفيف 15 دقيقة بعد العصر", "17:00")
-                        plannerRepo.addTask(
-                            title = "مشي خفيف 15 دقيقة واستنشاق هواء نقي",
-                            category = TaskCategory.HEALTH_HABIT,
-                            timeHint = "17:00 العشية",
-                            note = "خطوة طيبة لتنشيط البدن والدورة الدموية",
-                            isPriority = true
-                        )
-                    } else if (note.contains("نرقد") || note.contains("نوم") || note.contains("متأخر")) {
-                        healthRepo?.addHabit("تهيئة النوم وقراءة هادئة", "22:30")
-                    }
+                    val cat =
+                        arguments["category"]
+                            ?.toString()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "WELLNESS"
 
-                    "تم تسجيل الملاحظة الصحية بنجاح في السجل الصحي (معرف: $obsId) وتحديث البرنامج اليومي."
+                    val obsId =
+                        healthRepo?.addObservation(note, cat)
+                            ?: return "تعذر حفظ الملاحظة الصحية."
+
+                    "تم تسجيل الملاحظة الصحية في السجل الصحي (معرف: $obsId)."
                 }
 
                 "get_learning_progress" -> {
@@ -521,31 +607,63 @@ open class ToolExecutor(
                 }
 
                 "mark_concept_mastered" -> {
-                    val concept = arguments["conceptKey"]?.toString() ?: "الخلية"
-                    memoryRepo.saveMemoryWithDeduplication("أتقنت أمي مفهوم $concept بالكامل.", MemoryCategory.LEARNING, 4, "محرك التعلم")
-                    learningProgressRepo?.saveProgress(
+                    val concept =
+                        arguments["conceptKey"]
+                            ?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: return "مفتاح المفهوم مفقود."
+
+                    val repo =
+                        learningProgressRepo
+                            ?: return "محرك التعلم غير متاح حالياً."
+
+                    val existing =
+                        repo.getProgress(concept)
+
+                    repo.saveProgress(
                         conceptKey = concept,
-                        currentLevel = 2,
+                        currentLevel = maxOf(
+                            existing?.currentLevel ?: 1,
+                            2
+                        ),
                         mastery = "MASTERED",
                         needsReview = false,
-                        attempts = 1,
-                        successfulAttempts = 1
+                        attempts = (existing?.attempts ?: 0) + 1,
+                        successfulAttempts =
+                            (existing?.successfulAttempts ?: 0) + 1
                     )
-                    "تم تسجيل إتقان المفهوم ($concept) بنجاح."
+
+                    "تم تسجيل إتقان المفهوم ($concept) في سجل التعلم."
                 }
 
                 "mark_concept_needs_review" -> {
-                    val concept = arguments["conceptKey"]?.toString() ?: "الخلية"
-                    memoryRepo.saveMemoryWithDeduplication("مفهوم $concept يحتاج مراجعة وتبسيط إضافي.", MemoryCategory.LEARNING, 4, "محرك التعلم")
-                    learningProgressRepo?.saveProgress(
+                    val concept =
+                        arguments["conceptKey"]
+                            ?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: return "مفتاح المفهوم مفقود."
+
+                    val repo =
+                        learningProgressRepo
+                            ?: return "محرك التعلم غير متاح حالياً."
+
+                    val existing =
+                        repo.getProgress(concept)
+
+                    repo.saveProgress(
                         conceptKey = concept,
-                        currentLevel = 1,
+                        currentLevel =
+                            existing?.currentLevel ?: 1,
                         mastery = "NEEDS_REVIEW",
                         needsReview = true,
-                        attempts = 1,
-                        successfulAttempts = 0
+                        attempts = (existing?.attempts ?: 0) + 1,
+                        successfulAttempts =
+                            existing?.successfulAttempts ?: 0
                     )
-                    "تم تسجيل المفهوم ($concept) للمراجعة في الجلسة القادمة."
+
+                    "تم وضع المفهوم ($concept) في قائمة المراجعة."
                 }
 
                 "get_current_story" -> {
@@ -631,8 +749,24 @@ open class ToolExecutor(
                     val title = arguments["title"]?.toString() ?: return "خطأ: عنوان التذكير فارغ"
                     val expr = arguments["timeExpression"]?.toString() ?: ""
                     val cat = arguments["category"]?.toString() ?: "GENERAL"
-                    val isRecur = (arguments["isRecurring"] as? Boolean) ?: false
-                    val recurRule = arguments["recurrenceRule"]?.toString() ?: "DAILY"
+                    val isRecur =
+                        (arguments["isRecurring"] as? Boolean) ?: false
+
+                    val recurRule =
+                        arguments["recurrenceRule"]
+                            ?.toString()
+                            ?.uppercase()
+                            ?: "NONE"
+
+                    val destination =
+                        arguments["destination"]
+                            ?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+
+                    if (isRecur && recurRule !in setOf("DAILY", "WEEKLY")) {
+                        return "نوع التكرار غير واضح. اختاري يومياً أو أسبوعياً."
+                    }
 
                     if (expr.isBlank()) {
                         return "وقتاش تحبي نذكرك يا أمي؟ الصباح ولا في الليل؟"
@@ -664,6 +798,7 @@ open class ToolExecutor(
                             title = title,
                             triggerMillis = triggerMillis,
                             category = cat,
+                            destination = destination,
                             isRecurring = isRecur,
                             recurrenceRule = if (isRecur) recurRule else null,
                             originalTriggerMillis = triggerMillis
@@ -688,9 +823,21 @@ open class ToolExecutor(
                 "start_reading_session" -> {
                     val cid = arguments["contentId"]?.toString() ?: "content_heart_health"
                     val content = contentRepo?.getContentById(cid)
-                    val dur = (arguments["durationMinutes"] as? Number)?.toInt() ?: content?.estimatedMinutes ?: 10
+                    val requestedDuration =
+                        (arguments["durationMinutes"] as? Number)?.toInt()
+
+                    val contentDuration = content?.estimatedMinutes
+
+                    val dur = requestedDuration
+                        ?: contentDuration
+                        ?: return "ما عنديش مدة واضحة لجلسة القراءة. قوليلي مثلاً 10 دقايق ولا 20 دقيقة."
+
                     val title = content?.title ?: "قراءة هادئة"
-                    contentRepo?.startReadingSession(cid, title, dur * 60)
+                    contentRepo?.startReadingSession(
+                        cid,
+                        title,
+                        dur * 60
+                    )
                     "بدأت جلسة القراءة لمدة $dur دقائق: $title."
                 }
 
@@ -703,56 +850,205 @@ open class ToolExecutor(
 
                 "update_profile_from_conversation" -> {
                     val current = profileRepo.getProfile()
-                    val newAge = (arguments["age"] as? Number)?.toInt() ?: current.identity.age
-                    val newAct = arguments["dailyActivity"]?.toString() ?: current.health.dailyActivity
-                    val newSleep = arguments["sleepQuality"]?.toString() ?: current.health.sleepQuality
+
+                    val name =
+                        arguments["name"]?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: current.identity.name
+
+                    val age =
+                        (arguments["age"] as? Number)
+                            ?.toInt()
+                            ?.takeIf { it > 0 }
+                            ?: current.identity.age
+
+                    val location =
+                        arguments["generalLocation"]?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: current.identity.generalLocation
+
+                    val dialect =
+                        arguments["dialect"]?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: current.identity.preferredLanguage
+
+                    val activity =
+                        arguments["dailyActivity"]?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: current.health.dailyActivity
+
+                    val sleep =
+                        arguments["sleepQuality"]?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: current.health.sleepQuality
+
+                    val goals = parseCommaSeparated(arguments["learningGoals"])
+                    val interests = parseCommaSeparated(arguments["learningInterests"])
+                    val readingPreferences = parseCommaSeparated(
+                        arguments["readingPreferences"]
+                    )
+
                     val updated = current.copy(
-                        identity = current.identity.copy(age = newAge),
+                        identity = current.identity.copy(
+                            name = name,
+                            age = age,
+                            generalLocation = location,
+                            preferredLanguage = dialect
+                        ),
+                        learning = current.learning.copy(
+                            learningGoals =
+                                if (goals.isNotEmpty()) goals
+                                else current.learning.learningGoals,
+
+                            learningInterests =
+                                if (interests.isNotEmpty()) interests
+                                else current.learning.learningInterests
+                        ),
                         health = current.health.copy(
-                            dailyActivity = newAct,
-                            sleepQuality = newSleep
+                            dailyActivity = activity,
+                            sleepQuality = sleep,
+
+                            healthGoals =
+                                if (
+                                    arguments["primaryGoal"]
+                                        ?.toString()
+                                        ?.isNotBlank() == true
+                                ) {
+                                    listOf(
+                                        arguments["primaryGoal"]!!.toString().trim()
+                                    )
+                                } else {
+                                    current.health.healthGoals
+                                }
+                        ),
+                        preferences = current.preferences.copy(
+                            readingPreferences =
+                                if (readingPreferences.isNotEmpty()) {
+                                    readingPreferences
+                                } else {
+                                    current.preferences.readingPreferences
+                                }
                         )
                     )
+
                     profileRepo.updateProfile(updated)
 
-                    // Also sync with health profile V3
                     val hp = healthRepo?.getHealthProfile()
+
                     if (hp != null) {
                         healthRepo.saveHealthProfile(
                             hp.copy(
-                                age = newAge,
-                                activityLevel = newAct,
-                                sleepQuality = newSleep
+                                age = age,
+                                activityLevel = activity,
+                                sleepQuality = sleep,
+                                generalGoals =
+                                    if (arguments["primaryGoal"]
+                                            ?.toString()
+                                            ?.isNotBlank() == true
+                                    ) {
+                                        arguments["primaryGoal"]!!.toString().trim()
+                                    } else {
+                                        hp.generalGoals
+                                    }
                             )
                         )
                     }
 
-                    "تم تحديث بيانات الملف الشخصي والصحي بنجاح."
+                    "تم تحديث المعلومات التي صرحت بها أمي في الملف المناسب."
                 }
 
                 "create_french_lesson" -> {
-                    val word = arguments["frenchWord"]?.toString() ?: return "خطأ: الكلمة الفرنسية فارغة"
-                    val phonetic = arguments["phoneticArabic"]?.toString() ?: ""
-                    val meaning = arguments["tunisianMeaning"]?.toString() ?: ""
-                    val example = arguments["examplePhrase"]?.toString() ?: ""
-                    val cat = arguments["category"]?.toString() ?: "DAILY_LIFE"
+                    val requestedWord =
+                        arguments["frenchWord"]
+                            ?.toString()
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
 
-                    val all = frenchRepo.getAllWordsList()
-                    val newId = (all.maxOfOrNull { it.id } ?: 10) + 1
-                    val entity = com.example.data.local.entity.FrenchWordEntity(
-                        id = newId,
-                        frenchWord = word,
-                        arabicPhonetics = phonetic,
-                        arabicMeaning = meaning,
-                        tunisianEverydayContext = "سياق الاستعمال اليومي: $example",
-                        medicalContext = if (cat == "MEDICAL" || cat == "PHARMACY") "سياق طبي وصيدلي" else "",
-                        exampleDailySentence = example,
-                        exampleMedicalSentence = "",
-                        interactivePrompt = "قولي معايا يا أمي: $phonetic ($word)",
-                        isMastered = false
-                    )
-                    frenchRepo.insertWord(entity)
-                    "تمت إضافة الكلمة الفرنسية \"$word\" بنجاح إلى قاموس التعلم (معرف: $newId)."
+                    // If the user simply asks:
+                    // "علمني كلمة فرنسية"
+                    // use the real lesson generator.
+                    if (requestedWord == null) {
+                        val generator = FrenchLessonGenerator(frenchRepo)
+                        val lesson = generator.generateOrPickNextLesson()
+
+                        """
+                            درس فرنسي جديد:
+                            الكلمة: ${lesson.word}
+                            النطق: ${lesson.arabicPhonetics}
+                            المعنى: ${lesson.arabicMeaning}
+                            السياق التونسي: ${lesson.tunisianEverydayContext}
+                            المثال: ${lesson.exampleDailySentence}
+                            ${lesson.interactivePrompt}
+                        """.trimIndent()
+                    } else {
+                        // If Gemini explicitly requested a particular word,
+                        // preserve that behavior.
+                        val phonetic =
+                            arguments["phoneticArabic"]?.toString() ?: ""
+
+                        val meaning =
+                            arguments["tunisianMeaning"]?.toString() ?: ""
+
+                        val example =
+                            arguments["examplePhrase"]?.toString() ?: ""
+
+                        val category =
+                            arguments["category"]?.toString() ?: "DAILY_LIFE"
+
+                        if (phonetic.isBlank() || meaning.isBlank()) {
+                            "باش نعلمك الكلمة هذي بطريقة صحيحة، نحتاج معناها والنطق متاعها."
+                        } else {
+                            val existing = frenchRepo.getAllWordsList()
+                                .firstOrNull {
+                                    it.frenchWord.equals(
+                                        requestedWord,
+                                        ignoreCase = true
+                                    )
+                                }
+
+                            if (existing != null) {
+                                "الكلمة $requestedWord موجودة من قبل في دروسك."
+                            } else {
+                                val all = frenchRepo.getAllWordsList()
+
+                                val newId =
+                                    (all.maxOfOrNull { it.id } ?: 0) + 1
+
+                                val entity =
+                                    com.example.data.local.entity.FrenchWordEntity(
+                                        id = newId,
+                                        frenchWord = requestedWord,
+                                        arabicPhonetics = phonetic,
+                                        arabicMeaning = meaning,
+                                        tunisianEverydayContext =
+                                            "سياق الاستعمال اليومي: $example",
+                                        medicalContext =
+                                            if (
+                                                category == "MEDICAL" ||
+                                                category == "PHARMACY"
+                                            ) {
+                                                "سياق طبي وصيدلي"
+                                            } else {
+                                                ""
+                                            },
+                                        exampleDailySentence = example,
+                                        exampleMedicalSentence = "",
+                                        interactivePrompt =
+                                            "قولي معايا يا أمي: $phonetic ($requestedWord)",
+                                        isMastered = false
+                                    )
+
+                                frenchRepo.insertWord(entity)
+
+                                "تمت إضافة الكلمة الفرنسية \"$requestedWord\" إلى دروسك."
+                            }
+                        }
+                    }
                 }
 
                 "log_health_checkin" -> {

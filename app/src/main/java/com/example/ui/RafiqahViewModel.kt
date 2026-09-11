@@ -84,7 +84,8 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         reminderRepo = reminderRepo,
         learningRepo = learningProgressRepo,
         spacedRepetition = spacedRepetitionEngine,
-        contentSelectionEngine = contentSelectionEngine
+        contentSelectionEngine = contentSelectionEngine,
+        frenchRepo = frenchRepo
     )
 
     // Gemini Authentication Abstraction & Secure Store (V2.6)

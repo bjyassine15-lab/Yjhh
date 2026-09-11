@@ -64,7 +64,15 @@ class ContentRepository(private val contentDao: ContentDao) {
     suspend fun insertContentItems(items: List<ContentItemEntity>) = contentDao.insertContentItems(items)
 
     fun getLatestReadingSessionFlow(): Flow<ReadingSessionEntity?> = contentDao.getLatestReadingSessionFlow()
-    suspend fun startReadingSession(contentId: String, title: String, requiredSecs: Int = 600): Long {
+    suspend fun startReadingSession(
+        contentId: String,
+        title: String,
+        requiredSecs: Int
+    ): Long {
+        require(requiredSecs >= 60) {
+            "Reading session duration must be at least 60 seconds."
+        }
+
         return contentDao.insertReadingSession(
             ReadingSessionEntity(
                 contentId = contentId,
@@ -83,7 +91,11 @@ class ContentRepository(private val contentDao: ContentDao) {
         customRequiredSecs: Int? = null
     ) {
         val session = contentDao.getLatestReadingSession()
-        val targetReq = customRequiredSecs ?: session?.requiredDurationSeconds ?: 600
+        val targetReq = customRequiredSecs
+            ?: session?.requiredDurationSeconds
+            ?: throw IllegalStateException(
+                "No active reading session duration is available."
+            )
         val reqSecs = elapsedSeconds.coerceAtMost(targetReq)
         val optSecs = (elapsedSeconds - targetReq).coerceAtLeast(0)
         val reqCompleted = isCompleted || elapsedSeconds >= targetReq

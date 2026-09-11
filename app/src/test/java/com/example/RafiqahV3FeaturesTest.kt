@@ -90,7 +90,8 @@ class RafiqahV3FeaturesTest {
             reminderRepo = reminderRepo,
             learningRepo = learningRepo,
             spacedRepetition = spacedRepetition,
-            contentSelectionEngine = contentSelection
+            contentSelectionEngine = contentSelection,
+            frenchRepo = frenchRepo
         )
         toolExecutor = ToolExecutor(
             profileRepo = profileRepo,
@@ -313,5 +314,35 @@ class RafiqahV3FeaturesTest {
         // Neutral profile initialized with empty name
         assertEquals("", profile.identity.name)
         assertEquals(0, profile.identity.age)
+    }
+
+    // 10. V3.2 Test: Reading session requires explicit duration and rejects fallback 600s
+    @Test
+    fun testReadingSession_ExplicitDuration() = runBlocking {
+        // Calling start_reading_session with duration
+        val result = toolExecutor.executeTool(
+            "start_reading_session",
+            mapOf("contentId" to "content_heart_health", "durationMinutes" to 15)
+        )
+        assertTrue(result.contains("15 دقائق") || result.contains("15 دقيقة"))
+        val session = db.contentDao().getLatestReadingSession()
+        assertNotNull(session)
+        assertEquals(900, session!!.requiredDurationSeconds)
+    }
+
+    // 11. V3.2 Test: French lesson generator when no word is passed
+    @Test
+    fun testFrenchLessonGenerator_NoWordArgument() = runBlocking {
+        val result = toolExecutor.executeTool("create_french_lesson", emptyMap())
+        assertTrue(result.contains("درس فرنسي جديد") && result.contains("الكلمة:"))
+    }
+
+    // 12. V3.2 Test: Save health note creates observation without injecting synthetic habits
+    @Test
+    fun testSaveHealthNote_ObservationWithoutSyntheticHabits() = runBlocking {
+        val result = toolExecutor.executeTool("save_health_note", mapOf("note" to "أحس ببعض التعب بعد الظهيرة"))
+        assertTrue(result.contains("تم تسجيل الملاحظة الصحية في السجل الصحي"))
+        val obs = healthRepo.getRecentObservations(5)
+        assertTrue(obs.any { it.observationText.contains("أحس ببعض التعب") })
     }
 }

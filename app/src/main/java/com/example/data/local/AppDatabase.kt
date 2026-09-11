@@ -325,13 +325,13 @@ abstract class AppDatabase : RoomDatabase() {
                     ContentItemEntity(
                         id = "content_hydration_importance",
                         category = "HEALTH_EDUCATION",
-                        title = "سر الماء: نضارة العقل وحيوية المفاصل",
-                        body = "يمثل الماء أكثر من ستين بالمائة من وزن جسم الإنسان. كل قطرة ماء تشربينها تساعد الكليتين على تنقية الدم، وترطب المفاصل لتسهيل الحركة، وتمنح الدماغ الصفاء والانتباه. شرب الماء بانتظام طوال اليوم، دون انتظار الشعور بالعطش الشديد، عادة ذهبية لصحة مديدة.",
+                        title = "سر الماء: توازن السوائل والعافية اليومية",
+                        body = "يمثل الماء عنصراً حيوياً في تكوين جسم الإنسان. شرب كمية مناسبة من الماء يساعد الجسم على الحفاظ على توازن السوائل وترطيب الأنسجة، وتختلف الاحتياجات اليومية حسب الشخص والطقس والنشاط والحالة الصحية.",
                         estimatedMinutes = 7,
-                        keyTakeaway = "شرب الماء بانتظام ينشط الكليتين والمفاصل ويمنح الذهن صفاءً مستمراً.",
+                        keyTakeaway = "شرب كمية مناسبة من الماء يساعد الجسم على الحفاظ على توازن السوائل، وتختلف الاحتياجات حسب الشخص والجو والنشاط والحالة الصحية.",
                         relatedConceptKey = "hydration",
-                        quizQuestion = "لماذا ينصح بشرب الماء بانتظام دون انتظار العطش؟",
-                        quizAnswer = "لأن العطش إشارة متأخرة، والانتظام يحافظ على ترطيب المفاصل وتنقية الدم."
+                        quizQuestion = "ما أهمية الحفاظ على شرب الماء باعتدال؟",
+                        quizAnswer = "الحفاظ على توازن السوائل وترطيب الجسم بما يناسب احتياجات كل شخص."
                     ),
                     ContentItemEntity(
                         id = "content_ibn_al_jazzar",
@@ -368,43 +368,6 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                 )
             )
-
-            // Seed initial daily micro-sessions
-            if (database.routineDao().getActiveMicroSessions().isEmpty()) {
-                database.routineDao().insertOrUpdateSessions(
-                    listOf(
-                        MicroSessionEntity(
-                            id = "session_reading_1",
-                            type = "READING",
-                            title = "قراءة هادئة: كيف يعمل قلبك؟",
-                            durationMinutes = 10,
-                            scheduledAtTimeHint = "10:30",
-                            isRequired = true,
-                            priority = 1,
-                            contentId = "content_heart_health"
-                        ),
-                        MicroSessionEntity(
-                            id = "session_french_1",
-                            type = "FRENCH",
-                            title = "كلمة فرنسية وتطبيق في الصيدلية",
-                            durationMinutes = 4,
-                            scheduledAtTimeHint = "15:00",
-                            isRequired = true,
-                            priority = 2
-                        ),
-                        MicroSessionEntity(
-                            id = "session_mental_1",
-                            type = "MENTAL_EXERCISE",
-                            title = "تمرين ذهني خفيف: استرجاع معلومات الخلية",
-                            durationMinutes = 3,
-                            scheduledAtTimeHint = "18:00",
-                            isRequired = false,
-                            priority = 3,
-                            relatedConceptKey = "cell"
-                        )
-                    )
-                )
-            }
         }
     }
 }

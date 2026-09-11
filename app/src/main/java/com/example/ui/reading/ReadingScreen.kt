@@ -84,7 +84,11 @@ fun ReadingScreen(
     onConceptEvaluated: (conceptKey: String, isUnderstood: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    val totalRequiredSecs = (initialRequiredDurationSeconds ?: (contentItem?.estimatedMinutes?.times(60)) ?: 600).coerceAtLeast(60)
+    val totalRequiredSecs = (
+        initialRequiredDurationSeconds
+            ?: contentItem?.estimatedMinutes?.times(60)
+            ?: 0
+    ).coerceAtLeast(60)
     var currentMode by remember { mutableStateOf(ReadingMode.REQUIRED_TIME) }
     var secondsLeftInPhase by remember(totalRequiredSecs) { mutableIntStateOf(totalRequiredSecs) }
     var optionalSecondsElapsed by remember { mutableIntStateOf(0) }

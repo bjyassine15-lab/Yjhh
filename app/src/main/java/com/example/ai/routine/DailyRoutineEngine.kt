@@ -32,7 +32,8 @@ class DailyRoutineEngine(
     private val reminderRepo: ReminderRepository,
     private val learningRepo: LearningProgressRepository,
     private val spacedRepetition: SpacedRepetitionEngine,
-    private val contentSelectionEngine: ContentSelectionEngine? = null
+    private val contentSelectionEngine: ContentSelectionEngine? = null,
+    private val frenchRepo: com.example.data.repository.FrenchWordRepository? = null
 ) {
 
     fun getTodayDateKey(): String {
@@ -71,7 +72,6 @@ class DailyRoutineEngine(
         }
 
         // 2. Health & Wellness habits (only from real habits or active profile hydration goals)
-        val healthProfile = healthRepo.getHealthProfile()
         val realHabits = healthRepo.getAllHabits()
         if (realHabits.isNotEmpty()) {
             val habit = realHabits.first()
@@ -89,27 +89,9 @@ class DailyRoutineEngine(
                     requiredDurationSeconds = 300
                 )
             )
-        } else if (healthProfile != null && healthProfile.waterIntakeGoalGlasses > 0) {
-            val waterGlasses = healthProfile.currentWaterGlasses
-            val healthTitle = if (waterGlasses < 4) {
-                "عافية وصحة: شرب الماء وترطيب الجسم"
-            } else {
-                "نشاط وحيوية: مشي خفيف وتمارين استرخاء"
-            }
-            sessions.add(
-                MicroSessionEntity(
-                    id = "health_${System.currentTimeMillis()}_$todayKey",
-                    type = "HEALTH_HABIT",
-                    title = healthTitle,
-                    durationMinutes = 5,
-                    scheduledAtTimeHint = "09:30",
-                    isRequired = false,
-                    priority = priorityCounter++,
-                    status = "PLANNED",
-                    dateKey = todayKey,
-                    requiredDurationSeconds = 300
-                )
-            )
+        } else {
+            // Do not create a synthetic health session from default profile values.
+            // Health sessions must originate from an actual persisted user habit/goal.
         }
 
         // 3. Dynamic Educational Reading & Spaced Repetition Reviews (FIX 9 & FIX 20)
@@ -166,37 +148,28 @@ class DailyRoutineEngine(
             )
         }
 
-        // 4. French Daily Micro-Lesson
-        sessions.add(
-            MicroSessionEntity(
-                id = "french_${System.currentTimeMillis()}_$todayKey",
-                type = "FRENCH",
-                title = "كلمات فرنسية مفيدة: في الصيدلية والحياة اليومية",
-                durationMinutes = 4,
-                scheduledAtTimeHint = "16:00",
-                isRequired = true,
-                priority = priorityCounter++,
-                status = "PLANNED",
-                dateKey = todayKey,
-                requiredDurationSeconds = 240
-            )
-        )
+        // 4. French review is created only when there is actual learning data
+        // requiring review. Do not force a French session on every day.
+        val unmasteredWords = frenchRepo?.getAllWordsList()?.filter { !it.isMastered } ?: emptyList()
+        val dueFrenchConcepts = spacedRepetition.getDueReviews().filter { it.startsWith("french", ignoreCase = true) }
 
-        // 5. Evening Recap / Relaxing Story
-        sessions.add(
-            MicroSessionEntity(
-                id = "evening_${System.currentTimeMillis()}_$todayKey",
-                type = "STORY",
-                title = "جلسة مسائية: حكاية مريحة واسترجاع طيب",
-                durationMinutes = 6,
-                scheduledAtTimeHint = "20:00",
-                isRequired = false,
-                priority = priorityCounter++,
-                status = "PLANNED",
-                dateKey = todayKey,
-                requiredDurationSeconds = 360
+        if (unmasteredWords.isNotEmpty() && dueFrenchConcepts.isNotEmpty()) {
+            val word = unmasteredWords.first()
+            sessions.add(
+                MicroSessionEntity(
+                    id = "french_review_${word.id}_$todayKey",
+                    type = "FRENCH",
+                    title = "مراجعة كلمة فرنسية: ${word.frenchWord}",
+                    durationMinutes = 4,
+                    scheduledAtTimeHint = "16:00",
+                    isRequired = true,
+                    priority = priorityCounter++,
+                    status = "PLANNED",
+                    dateKey = todayKey,
+                    requiredDurationSeconds = 240
+                )
             )
-        )
+        }
 
         routineRepo.saveSessions(sessions)
         return sessions
