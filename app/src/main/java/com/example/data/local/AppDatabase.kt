@@ -121,19 +121,19 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         suspend fun seedInitialData(database: AppDatabase) {
-            // Seed profile with neutral initial state (no fake age or medical assumptions)
+            // Seed profile with neutral initial state (FIX 18 - awaiting user onboarding / conversation)
             database.profileDao().insertOrUpdateProfile(
                 ProfileEntity(
                     id = 1,
-                    name = "أمي الحبيبة",
+                    name = "",
                     age = 0,
                     preferredLanguage = "العربية - التونسية المبسطة",
                     speakingStyle = "حنون، هادئ ومبسط",
-                    medicineKnowledgeLevel = "مبتدئة محبة للتعلم",
-                    scienceLevel = "معرفة عامة",
-                    frenchLevel = "تونسية يومية",
-                    lastLessonTitle = "بداية الرحلة التعليمية",
-                    lastChapterNumber = 1,
+                    medicineKnowledgeLevel = "",
+                    scienceLevel = "",
+                    frenchLevel = "",
+                    lastLessonTitle = "",
+                    lastChapterNumber = 0,
                     progressPercent = 0,
                     heightCm = 0f,
                     weightKg = 0f,
@@ -142,32 +142,6 @@ abstract class AppDatabase : RoomDatabase() {
                     studyTime = "",
                     restTimes = "",
                     sessionDurationMinutes = 10
-                )
-            )
-
-            // Seed initial long term memories
-            database.memoryDao().insertMemory(
-                MemoryEntity(
-                    category = "USER_FACT",
-                    content = "تحب الهدوء، وتتعلم أحسن كي نعطيوها أمثلة من الكوجينة والدار والواقع التونسي.",
-                    importance = 5,
-                    source = "ملف شخصي مؤسس"
-                )
-            )
-            database.memoryDao().insertMemory(
-                MemoryEntity(
-                    category = "WELLNESS",
-                    content = "تحرص على شرب الماء والتغذية المنزلية المتوازنة والمشي اليومي.",
-                    importance = 3,
-                    source = "نمط الحياة اليومي"
-                )
-            )
-            database.memoryDao().insertMemory(
-                MemoryEntity(
-                    category = "PREFERENCE",
-                    content = "تفضل الحديث الصوتي التونسي الهادئ، وجلسة لا تتجاوز 7 إلى 10 دقائق.",
-                    importance = 4,
-                    source = "تفضيلات المحادثة"
                 )
             )
 
@@ -230,43 +204,6 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             )
             database.storyDao().insertChapters(chapters)
-
-            // Seed daily tasks
-            val tasks = listOf(
-                DailyTaskEntity(
-                    title = "شرب كأس ماء دافئ مع فطور الصباح",
-                    category = "HEALTH_HABIT",
-                    timeHint = "08:30 صباحًا",
-                    isCompleted = false,
-                    note = "بدء اليوم بماء دافئ وفطور هادئ ومتوازن",
-                    isPriority = true
-                ),
-                DailyTaskEntity(
-                    title = "جلسة رفيقة: حكاية الخلية والطب",
-                    category = "STUDY",
-                    timeHint = "11:00 صباحًا أو المساء",
-                    isCompleted = false,
-                    note = "7 دقايق تركيز ممتعة مع سارة",
-                    isPriority = true
-                ),
-                DailyTaskEntity(
-                    title = "قيلولة واستراحة طيبة",
-                    category = "REST",
-                    timeHint = "14:00 بعد الظهر",
-                    isCompleted = false,
-                    note = "إراحة العينين والبدن في غرفة مهواة وهادئة",
-                    isPriority = false
-                ),
-                DailyTaskEntity(
-                    title = "شرب كأسين ماء ومشي خفيف",
-                    category = "HEALTH_HABIT",
-                    timeHint = "17:30 العشية",
-                    isCompleted = false,
-                    note = "حركة خفيفة وتنشيط الدورة الدموية",
-                    isPriority = true
-                )
-            )
-            database.dailyTaskDao().insertTasks(tasks)
 
             // Seed French words
             val words = listOf(
@@ -356,9 +293,9 @@ abstract class AppDatabase : RoomDatabase() {
                         id = "content_heart_health",
                         category = "HEALTH_EDUCATION",
                         title = "كيف يعمل قلبك؟ مضخة الحياة العجيبة",
-                        body = "القلب هو العضلة الأقوى والأوفى في جسم الإنسان. ينبض أكثر من 100 ألف مرة كل يوم بدون توقف، ليضخ الدم المحمل بالأكسجين والغذاء إلى كل خلية في الجسم. تخيلي يا أمي أن هذه العضلة الصغيرة التي بحجم قبضة اليد ترسل الدم عبر أوعية دموية طولها آلاف الكيلومترات! المشي الخفيف يومياً، وشرب الماء، والابتعاد عن التوتر هو أحسن هدية تقدمينها لقلبك ليظل ينبض بالصحة والنشاط.",
+                        body = "القلب هو العضلة الأقوى والأوفى في جسم الإنسان. ينبض أكثر من 100 ألف مرة كل يوم بدون توقف، ليضخ الدم المحمل بالأكسجين والغذاء إلى كل خلية في الجسم. تخيلي يا أمي أن هذه العضلة الصغيرة التي بحجم قبضة اليد ترسل الدم عبر أوعية دموية طولها آلاف الكيلومترات! النشاط البدني المنتظم والنوم الجيد وشرب كمية مناسبة من السوائل هي أجزاء عامة من نمط حياة صحي، وتختلف الاحتياجات من شخص لآخر.",
                         estimatedMinutes = 10,
-                        keyTakeaway = "المشي وشرب الماء والنوم الهادئ يحافظ على صحة عضلة القلب وضغط دم متوازن.",
+                        keyTakeaway = "النشاط البدني المنتظم والنوم الجيد وشرب كمية مناسبة من السوائل هي أجزاء عامة من نمط حياة صحي، وتختلف الاحتياجات من شخص لآخر.",
                         relatedConceptKey = "heart",
                         quizQuestion = "كم مرة ينبض القلب تقريباً في اليوم؟",
                         quizAnswer = "أكثر من 100 ألف مرة كل يوم."
@@ -411,12 +348,12 @@ abstract class AppDatabase : RoomDatabase() {
                         id = "content_olive_tree",
                         category = "CULTURE",
                         title = "شجرة الزيتون المباركة في تونس",
-                        body = "شجرة الزيتون في تونس ليست مجرد شجرة، بل هي رمز للصبر والبركة والعطاء الممتد لآلاف السنين. أجدادنا اعتمدوا على زيت الزيتون كغذاء ودواء طبيعي يقوي المناعة ويحمي الشرايين. حبة الزيتون والزيت التونسي الأصيل يحملان مضادات أكسدة طبيعية تحافظ على شباب الخلايا وقوة الذاكرة.",
+                        body = "شجرة الزيتون في تونس ليست مجرد شجرة، بل هي رمز للصبر والبركة والعطاء الممتد لآلاف السنين. أجدادنا اعتمدوا على زيت الزيتون كجزء أصيل من التغذية اليومية المتوازنة. حبة الزيتون والزيت التونسي الأصيل يحملان عناصر غذائية طبيعية ومضادات أكسدة تدعم التغذية الصحية.",
                         estimatedMinutes = 10,
-                        keyTakeaway = "زيت الزيتون غذاء مبارك غني بمضادات الأكسدة التي تحمي القلب والشرايين.",
+                        keyTakeaway = "زيت الزيتون غذاء تقليدي متوازن غني بمضادات الأكسدة التي تدعم التغذية الصحية.",
                         relatedConceptKey = "nutrition",
-                        quizQuestion = "ما الفائدة الصحية الأساسية لزيت الزيتون الطبيعي؟",
-                        quizAnswer = "حماية شرايين القلب وخلايا الجسم بمضادات الأكسدة الطبيعية."
+                        quizQuestion = "ما الفائدة الغذائية لزيت الزيتون الطبيعي؟",
+                        quizAnswer = "دعم التغذية الصحية المتوازنة بمضادات الأكسدة الطبيعية."
                     ),
                     ContentItemEntity(
                         id = "content_french_daily",

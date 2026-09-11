@@ -255,6 +255,8 @@ object AIToolRegistry {
                     put("title", buildParam("STRING", "نص التذكير، مثلا: شرب الماء، موعد الطبيب، قراءة"))
                     put("timeExpression", buildParam("STRING", "التعبير الزمني، مثلا: غدوة على الثمانية، بعد ساعتين"))
                     put("category", buildParam("STRING", "التصنيف: MEDICINE, APPOINTMENT, WATER, READING, GENERAL"))
+                    put("isRecurring", buildParam("BOOLEAN", "هل التذكير متكرر بانتظام (افتراضي: false)"))
+                    put("recurrenceRule", buildParam("STRING", "قاعدة التكرار: DAILY, WEEKLY"))
                 })
                 put("required", JSONArray().apply { put("title"); put("timeExpression") })
             }
@@ -379,7 +381,8 @@ open class ToolExecutor(
     private val reminderRepo: com.example.data.repository.ReminderRepository? = null,
     private val reminderScheduler: com.example.service.reminder.ReminderScheduler? = null,
     private val contentRepo: com.example.data.repository.ContentRepository? = null,
-    private val focusRepo: com.example.data.repository.FocusRepository? = null
+    private val focusRepo: com.example.data.repository.FocusRepository? = null,
+    private val learningProgressRepo: com.example.data.repository.LearningProgressRepository? = null
 ) {
 
     open fun isConfirmationRequired(toolName: String, args: Map<String, Any?>): Boolean {
@@ -520,12 +523,28 @@ open class ToolExecutor(
                 "mark_concept_mastered" -> {
                     val concept = arguments["conceptKey"]?.toString() ?: "الخلية"
                     memoryRepo.saveMemoryWithDeduplication("أتقنت أمي مفهوم $concept بالكامل.", MemoryCategory.LEARNING, 4, "محرك التعلم")
+                    learningProgressRepo?.saveProgress(
+                        conceptKey = concept,
+                        currentLevel = 2,
+                        mastery = "MASTERED",
+                        needsReview = false,
+                        attempts = 1,
+                        successfulAttempts = 1
+                    )
                     "تم تسجيل إتقان المفهوم ($concept) بنجاح."
                 }
 
                 "mark_concept_needs_review" -> {
                     val concept = arguments["conceptKey"]?.toString() ?: "الخلية"
                     memoryRepo.saveMemoryWithDeduplication("مفهوم $concept يحتاج مراجعة وتبسيط إضافي.", MemoryCategory.LEARNING, 4, "محرك التعلم")
+                    learningProgressRepo?.saveProgress(
+                        conceptKey = concept,
+                        currentLevel = 1,
+                        mastery = "NEEDS_REVIEW",
+                        needsReview = true,
+                        attempts = 1,
+                        successfulAttempts = 0
+                    )
                     "تم تسجيل المفهوم ($concept) للمراجعة في الجلسة القادمة."
                 }
 
@@ -646,7 +665,8 @@ open class ToolExecutor(
                             triggerMillis = triggerMillis,
                             category = cat,
                             isRecurring = isRecur,
-                            recurrenceRule = if (isRecur) recurRule else null
+                            recurrenceRule = if (isRecur) recurRule else null,
+                            originalTriggerMillis = triggerMillis
                         )
                         res.feedbackMessage
                     } else {
@@ -667,8 +687,8 @@ open class ToolExecutor(
 
                 "start_reading_session" -> {
                     val cid = arguments["contentId"]?.toString() ?: "content_heart_health"
-                    val dur = (arguments["durationMinutes"] as? Number)?.toInt() ?: 10
                     val content = contentRepo?.getContentById(cid)
+                    val dur = (arguments["durationMinutes"] as? Number)?.toInt() ?: content?.estimatedMinutes ?: 10
                     val title = content?.title ?: "قراءة هادئة"
                     contentRepo?.startReadingSession(cid, title, dur * 60)
                     "بدأت جلسة القراءة لمدة $dur دقائق: $title."

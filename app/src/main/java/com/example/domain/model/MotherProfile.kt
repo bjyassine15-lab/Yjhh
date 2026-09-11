@@ -9,8 +9,9 @@ data class MotherProfile(
 )
 
 data class Identity(
-    val name: String = "أمي الحبيبة",
+    val name: String = "",
     val age: Int = 0, // 0 indicates not set yet
+    val generalLocation: String = "",
     val preferredLanguage: String = "العربية (اللهجة التونسية المبسطة)",
     val speakingStyle: String = "دافئ، هادئ، محترم ومبسط"
 )
@@ -22,6 +23,8 @@ data class LearningProfile(
     val conceptsInProgress: List<String> = emptyList(),
     val scienceLevel: String = "معرفة عامة",
     val frenchLevel: String = "تونسية يومية",
+    val learningGoals: List<String> = emptyList(),
+    val learningInterests: List<String> = emptyList(),
     val preferredExplanationType: String = "قصص، تشبيهات من الواقع وأمثلة ملموسة",
     val lovedStories: List<String> = emptyList(),
     val dislikedTopics: List<String> = emptyList(),
@@ -54,6 +57,7 @@ data class DailyProfile(
 data class UserPreferences(
     val prefersVoice: Boolean = true,
     val sessionDurationMinutes: Int = 10,
+    val readingPreferences: List<String> = emptyList(),
     val favoriteStoryType: String = "قصص إنسانية واقعية ومبسطة",
     val preferredLearningPace: String = "خفيف وبسيط بدون ضغط"
 )

@@ -39,6 +39,9 @@ interface HealthDao {
     @Query("SELECT * FROM wellness_habits ORDER BY id ASC")
     fun getAllHabitsFlow(): Flow<List<HabitEntity>>
 
+    @Query("SELECT * FROM wellness_habits ORDER BY id ASC")
+    suspend fun getAllHabits(): List<HabitEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHabit(habit: HabitEntity): Long
 

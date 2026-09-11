@@ -65,25 +65,61 @@ class ReminderReceiver : BroadcastReceiver() {
 
         notificationManager.notify(reminderId.toInt(), notification)
 
-        // Handle recurrence rescheduling
+        // Handle recurrence rescheduling (FIX 3 & FIX 17 - preserving original time-of-day without drift)
         if (isRecurring) {
             val scheduler = ReminderScheduler(context)
-            val intervalMillis = if (recurrenceRule.equals("WEEKLY", ignoreCase = true)) {
-                7 * 24 * 3600 * 1000L
-            } else {
-                24 * 3600 * 1000L // DAILY
-            }
-            val nextTrigger = System.currentTimeMillis() + intervalMillis
-            scheduler.scheduleReminder(
-                id = reminderId,
-                title = title,
-                triggerMillis = nextTrigger,
-                category = category,
-                destination = destination,
-                isRecurring = true,
+            val originalTrigger = intent.getLongExtra(EXTRA_ORIGINAL_TRIGGER, System.currentTimeMillis())
+            val nextTrigger = calculateNextOccurrence(
+                originalTriggerMillis = originalTrigger,
                 recurrenceRule = recurrenceRule
             )
+            if (nextTrigger > 0L) {
+                scheduler.scheduleReminder(
+                    id = reminderId,
+                    title = title,
+                    triggerMillis = nextTrigger,
+                    category = category,
+                    destination = destination,
+                    isRecurring = true,
+                    recurrenceRule = recurrenceRule,
+                    originalTriggerMillis = originalTrigger
+                )
+            }
         }
+    }
+
+    private fun calculateNextOccurrence(
+        originalTriggerMillis: Long,
+        recurrenceRule: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Long {
+        val original = java.util.Calendar.getInstance().apply {
+            timeInMillis = originalTriggerMillis
+        }
+
+        val next = java.util.Calendar.getInstance().apply {
+            timeInMillis = nowMillis
+            set(java.util.Calendar.HOUR_OF_DAY, original.get(java.util.Calendar.HOUR_OF_DAY))
+            set(java.util.Calendar.MINUTE, original.get(java.util.Calendar.MINUTE))
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+
+        when (recurrenceRule.uppercase()) {
+            "WEEKLY" -> {
+                while (next.timeInMillis <= nowMillis) {
+                    next.add(java.util.Calendar.DAY_OF_YEAR, 7)
+                }
+            }
+            "DAILY" -> {
+                while (next.timeInMillis <= nowMillis) {
+                    next.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                }
+            }
+            else -> return 0L
+        }
+
+        return next.timeInMillis
     }
 
     private fun mapCategoryToDestination(category: String): String {
@@ -103,6 +139,7 @@ class ReminderReceiver : BroadcastReceiver() {
         const val EXTRA_DESTINATION = "com.example.reminder.EXTRA_DESTINATION"
         const val EXTRA_IS_RECURRING = "com.example.reminder.EXTRA_IS_RECURRING"
         const val EXTRA_RECURRENCE_RULE = "com.example.reminder.EXTRA_RECURRENCE_RULE"
+        const val EXTRA_ORIGINAL_TRIGGER = "com.example.reminder.EXTRA_ORIGINAL_TRIGGER"
 
         const val CHANNEL_REMINDERS = "rafiqah_reminders_channel"
         const val CHANNEL_HEALTH = "rafiqah_health_channel"
@@ -156,7 +193,8 @@ class ReminderScheduler(private val context: Context) {
         category: String = "GENERAL",
         destination: String? = null,
         isRecurring: Boolean = false,
-        recurrenceRule: String? = null
+        recurrenceRule: String? = null,
+        originalTriggerMillis: Long = triggerMillis
     ): ReminderScheduleResult {
         if (alarmManager == null) {
             return ReminderScheduleResult(
@@ -185,6 +223,7 @@ class ReminderScheduler(private val context: Context) {
             putExtra(ReminderReceiver.EXTRA_DESTINATION, dest)
             putExtra(ReminderReceiver.EXTRA_IS_RECURRING, isRecurring)
             putExtra(ReminderReceiver.EXTRA_RECURRENCE_RULE, recurrenceRule ?: "DAILY")
+            putExtra(ReminderReceiver.EXTRA_ORIGINAL_TRIGGER, originalTriggerMillis)
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,

@@ -102,7 +102,8 @@ class RafiqahV3FeaturesTest {
             reminderRepo = reminderRepo,
             reminderScheduler = reminderScheduler,
             contentRepo = contentRepo,
-            focusRepo = focusRepo
+            focusRepo = focusRepo,
+            learningProgressRepo = learningRepo
         )
         appBlockingController = AppBlockingController(context, focusRepo)
         frenchLessonGenerator = FrenchLessonGenerator(frenchRepo)
@@ -283,5 +284,34 @@ class RafiqahV3FeaturesTest {
         val rescheduled = routineRepo.getSessionsForDate(dailyRoutineEngine.getTodayDateKey()).first { it.id == secondSession.id }
         assertEquals("RESCHEDULED", rescheduled.status)
         assertEquals("17:30", rescheduled.scheduledAtTimeHint)
+    }
+
+    // 8. V3.2 Test: Concept Mastery and Needs Review Updates Learning Progress DAO
+    @Test
+    fun testConceptMasteryAndReview_UpdatesLearningProgressDao() = runBlocking {
+        toolExecutor.executeTool("mark_concept_mastered", mapOf("conceptKey" to "mitochondria"))
+        val mastered = learningRepo.getProgress("mitochondria")
+        assertNotNull(mastered)
+        assertEquals("MASTERED", mastered!!.mastery)
+        assertFalse(mastered.needsReview)
+
+        toolExecutor.executeTool("mark_concept_needs_review", mapOf("conceptKey" to "cell_membrane"))
+        val review = learningRepo.getProgress("cell_membrane")
+        assertNotNull(review)
+        assertEquals("NEEDS_REVIEW", review!!.mastery)
+        assertTrue(review.needsReview)
+    }
+
+    // 9. V3.2 Test: Sanitized Database Seeding has neutral profile and no pre-seeded memories/tasks
+    @Test
+    fun testSanitizedDatabaseSeeding_NeutralProfileAndNoFakeMemories() = runBlocking {
+        val memories = memoryRepo.getAllMemoriesList()
+        // Ensure no fake personal memories are pre-seeded
+        assertFalse(memories.any { it.content.contains("تحب الحلبة") || it.content.contains("تعاني من ضغط دم") })
+
+        val profile = profileRepo.getProfile()
+        // Neutral profile initialized with empty name
+        assertEquals("", profile.identity.name)
+        assertEquals(0, profile.identity.age)
     }
 }

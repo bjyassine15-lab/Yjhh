@@ -70,64 +70,101 @@ class DailyRoutineEngine(
             )
         }
 
-        // 2. Health & Wellness habits
+        // 2. Health & Wellness habits (only from real habits or active profile hydration goals)
         val healthProfile = healthRepo.getHealthProfile()
-        val waterGlasses = healthProfile?.currentWaterGlasses ?: 0
-        val healthTitle = if (waterGlasses < 4) {
-            "عافية وصحة: شرب الماء وترطيب الجسم"
-        } else {
-            "نشاط وحيوية: مشي خفيف وتمارين استرخاء"
-        }
-        sessions.add(
-            MicroSessionEntity(
-                id = "health_${System.currentTimeMillis()}_$todayKey",
-                type = "HEALTH_HABIT",
-                title = healthTitle,
-                durationMinutes = 5,
-                scheduledAtTimeHint = "09:30",
-                isRequired = false,
-                priority = priorityCounter++,
-                status = "PLANNED",
-                dateKey = todayKey,
-                requiredDurationSeconds = 300
+        val realHabits = healthRepo.getAllHabits()
+        if (realHabits.isNotEmpty()) {
+            val habit = realHabits.first()
+            sessions.add(
+                MicroSessionEntity(
+                    id = "health_habit_${habit.id}_$todayKey",
+                    type = "HEALTH_HABIT",
+                    title = habit.title,
+                    durationMinutes = 5,
+                    scheduledAtTimeHint = habit.timeHint.ifBlank { "09:30" },
+                    isRequired = false,
+                    priority = priorityCounter++,
+                    status = "PLANNED",
+                    dateKey = todayKey,
+                    requiredDurationSeconds = 300
+                )
             )
-        )
+        } else if (healthProfile != null && healthProfile.waterIntakeGoalGlasses > 0) {
+            val waterGlasses = healthProfile.currentWaterGlasses
+            val healthTitle = if (waterGlasses < 4) {
+                "عافية وصحة: شرب الماء وترطيب الجسم"
+            } else {
+                "نشاط وحيوية: مشي خفيف وتمارين استرخاء"
+            }
+            sessions.add(
+                MicroSessionEntity(
+                    id = "health_${System.currentTimeMillis()}_$todayKey",
+                    type = "HEALTH_HABIT",
+                    title = healthTitle,
+                    durationMinutes = 5,
+                    scheduledAtTimeHint = "09:30",
+                    isRequired = false,
+                    priority = priorityCounter++,
+                    status = "PLANNED",
+                    dateKey = todayKey,
+                    requiredDurationSeconds = 300
+                )
+            )
+        }
 
-        // 3. Dynamic Educational Reading (Driven by ContentSelectionEngine & Spaced Repetition)
+        // 3. Dynamic Educational Reading & Spaced Repetition Reviews (FIX 9 & FIX 20)
         val dueConcepts = spacedRepetition.getDueReviews()
-        val primaryDueConcept = dueConcepts.firstOrNull()
-
-        val selectedContent = contentSelectionEngine?.selectContentForSession(
-            sessionType = "READING",
-            preferredConceptKey = primaryDueConcept
-        )
-
-        val readingTitle = if (selectedContent != null) {
-            "جلسة قراءة: ${selectedContent.title}"
-        } else if (primaryDueConcept != null) {
-            val conceptState = spacedRepetition.getConceptState(primaryDueConcept)
-            "مراجعة وتثبيت: ${conceptState.title}"
+        if (dueConcepts.isNotEmpty()) {
+            dueConcepts.take(2).forEachIndexed { idx, dueConcept ->
+                val selectedContent = contentSelectionEngine?.selectContentForSession(
+                    sessionType = "READING",
+                    preferredConceptKey = dueConcept
+                )
+                val conceptState = spacedRepetition.getConceptState(dueConcept)
+                val readingTitle = if (selectedContent != null) {
+                    "مراجعة: ${selectedContent.title}"
+                } else {
+                    "مراجعة وتثبيت: ${conceptState.title}"
+                }
+                val readingMinutes = selectedContent?.estimatedMinutes ?: 8
+                sessions.add(
+                    MicroSessionEntity(
+                        id = "review_${dueConcept}_${System.currentTimeMillis()}_${idx}_$todayKey",
+                        type = "READING",
+                        title = readingTitle,
+                        durationMinutes = readingMinutes,
+                        scheduledAtTimeHint = if (idx == 0) "11:00" else "15:30",
+                        isRequired = true,
+                        priority = priorityCounter++,
+                        contentId = selectedContent?.id ?: "content_heart_health",
+                        relatedConceptKey = dueConcept,
+                        status = "PLANNED",
+                        dateKey = todayKey,
+                        requiredDurationSeconds = readingMinutes * 60
+                    )
+                )
+            }
         } else {
-            "قراءة هادئة: كيف يعمل قلبك؟ مضخة الحياة"
-        }
-
-        val readingMinutes = selectedContent?.estimatedMinutes ?: 10
-        sessions.add(
-            MicroSessionEntity(
-                id = "reading_${System.currentTimeMillis()}_$todayKey",
-                type = "READING",
-                title = readingTitle,
-                durationMinutes = readingMinutes,
-                scheduledAtTimeHint = "11:00",
-                isRequired = true,
-                priority = priorityCounter++,
-                contentId = selectedContent?.id ?: "content_heart_health",
-                relatedConceptKey = selectedContent?.relatedConceptKey ?: primaryDueConcept ?: "heart",
-                status = "PLANNED",
-                dateKey = todayKey,
-                requiredDurationSeconds = readingMinutes * 60
+            val selectedContent = contentSelectionEngine?.selectContentForSession(sessionType = "READING")
+            val readingTitle = selectedContent?.title?.let { "جلسة قراءة: $it" } ?: "قراءة هادئة: كيف يعمل قلبك؟"
+            val readingMinutes = selectedContent?.estimatedMinutes ?: 10
+            sessions.add(
+                MicroSessionEntity(
+                    id = "reading_${System.currentTimeMillis()}_$todayKey",
+                    type = "READING",
+                    title = readingTitle,
+                    durationMinutes = readingMinutes,
+                    scheduledAtTimeHint = "11:00",
+                    isRequired = true,
+                    priority = priorityCounter++,
+                    contentId = selectedContent?.id ?: "content_heart_health",
+                    relatedConceptKey = selectedContent?.relatedConceptKey ?: "heart",
+                    status = "PLANNED",
+                    dateKey = todayKey,
+                    requiredDurationSeconds = readingMinutes * 60
+                )
             )
-        )
+        }
 
         // 4. French Daily Micro-Lesson
         sessions.add(
@@ -178,7 +215,7 @@ class DailyRoutineEngine(
         }
 
         val greeting = "صباح النور والسرور يا أمي الغالية 🌸. نهارك طيب ومبارك."
-        val wellnessTip = "كأس ماء دافئ الصباح مع مشي خفيف يعطيك طاقة ونشاط ويحمي ضغط الدم."
+        val wellnessTip = "بدء اليوم بكأس ماء مع حركة خفيفة يساعد على الشعور بالنشاط والانتعاش."
 
         return DailyCoachSummary(
             greeting = greeting,

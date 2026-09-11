@@ -34,6 +34,7 @@ class HealthRepository(private val healthDao: HealthDao) {
     }
 
     fun getHabitsFlow(): Flow<List<HabitEntity>> = healthDao.getAllHabitsFlow()
+    suspend fun getAllHabits(): List<HabitEntity> = healthDao.getAllHabits()
     suspend fun addHabit(title: String, timeHint: String): Long {
         return healthDao.insertHabit(
             HabitEntity(

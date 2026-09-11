@@ -125,7 +125,8 @@ class RafiqahViewModel(application: Application) : AndroidViewModel(application)
         reminderRepo = reminderRepo,
         reminderScheduler = reminderScheduler,
         contentRepo = contentRepo,
-        focusRepo = focusRepo
+        focusRepo = focusRepo,
+        learningProgressRepo = learningProgressRepo
     )
 
     val appBlockingController = com.example.service.focus.AppBlockingController(application, focusRepo)

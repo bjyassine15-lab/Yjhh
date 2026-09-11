@@ -71,7 +71,7 @@ class FrenchLessonGenerator(
             tunisianEverydayContext = "نقولو: 'الطبيب قالي اعمل ريجيم خفيف ونقص الملح والدهنيات'.",
             medicalContext = "تعديل نمط الأكل لحماية الشرايين والتحكم في الوزن والضغط.",
             exampleDailySentence = "نتبع في ريجيم صحي فيه برشا خضرة وماء وشوربة دافية.",
-            exampleMedicalSentence = "الريجيم قليل الملح يريح القلب ويخلي التونسيو ديما ممتازة.",
+            exampleMedicalSentence = "الريجيم قليل الملح يدعم صحة القلب ويساعد في المحافظة على استقرار الضغط.",
             interactivePrompt = "ريجيم، مش حرمان بل صحة وعافية."
         ),
         GeneratedFrenchLesson(
