@@ -136,11 +136,11 @@ class AppBlockingController(
         val status = BlockingStatus(
             state = state,
             capability = capability,
-            focusBlockingMode = if (hasUsageAccess) FocusBlockingMode.ACTIVE else FocusBlockingMode.TIMER_ONLY,
+            focusBlockingMode = FocusBlockingMode.TIMER_ONLY,
             hasUsageAccess = hasUsageAccess,
             activeBlockedAppsCount = blockedApps.size,
             statusMessage = if (hasUsageAccess) {
-                "وضع التركيز يعمل بالمراقبة والتنبيه فقط."
+                "وضع التركيز يعمل بالمؤقت والمتابعة فقط. لا يتم إغلاق التطبيقات."
             } else {
                 "يجب تفعيل صلاحية الوصول إلى بيانات الاستخدام (Usage Access)."
             },
@@ -170,11 +170,7 @@ class AppBlockingController(
             else -> BlockingState.MONITORING_ONLY
         }
 
-        val mode = if (isFocusPolicyActive && hasPermission) {
-            FocusBlockingMode.ACTIVE
-        } else {
-            FocusBlockingMode.TIMER_ONLY
-        }
+        val mode = FocusBlockingMode.TIMER_ONLY
 
         val message = when {
             !hasPermission -> "يجب تفعيل صلاحية الوصول إلى بيانات الاستخدام (NOT_CONFIGURED)"

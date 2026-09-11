@@ -64,7 +64,7 @@ data class MicroSessionEntity(
     val isSkipped: Boolean = false,
     val status: String = "PLANNED", // PLANNED, STARTED, COMPLETED, SKIPPED, RESCHEDULED
     val dateKey: String = "", // e.g. "2026-09-11" to preserve and reload today's routine
-    val requiredDurationSeconds: Int = 600,
+    val requiredDurationSeconds: Int,
     val priority: Int = 1,
     val relatedConceptKey: String? = null,
     val contentId: String? = null,
@@ -95,7 +95,7 @@ data class ReadingSessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val contentId: String,
     val contentTitle: String,
-    val requiredDurationSeconds: Int = 600, // 10 minutes
+    val requiredDurationSeconds: Int,
     val elapsedRequiredSeconds: Int = 0,
     val elapsedOptionalSeconds: Int = 0,
     val isRequiredCompleted: Boolean = false,

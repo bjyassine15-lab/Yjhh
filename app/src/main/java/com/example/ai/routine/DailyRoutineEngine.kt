@@ -127,34 +127,47 @@ class DailyRoutineEngine(
                 )
             }
         } else {
-            val selectedContent = contentSelectionEngine?.selectContentForSession(sessionType = "READING")
-            val readingTitle = selectedContent?.title?.let { "جلسة قراءة: $it" } ?: "قراءة هادئة: كيف يعمل قلبك؟"
-            val readingMinutes = selectedContent?.estimatedMinutes ?: 10
-            sessions.add(
-                MicroSessionEntity(
-                    id = "reading_${System.currentTimeMillis()}_$todayKey",
-                    type = "READING",
-                    title = readingTitle,
-                    durationMinutes = readingMinutes,
-                    scheduledAtTimeHint = "11:00",
-                    isRequired = true,
-                    priority = priorityCounter++,
-                    contentId = selectedContent?.id ?: "content_heart_health",
-                    relatedConceptKey = selectedContent?.relatedConceptKey ?: "heart",
-                    status = "PLANNED",
-                    dateKey = todayKey,
-                    requiredDurationSeconds = readingMinutes * 60
+            val selectedContent =
+                contentSelectionEngine?.selectContentForSession(
+                    sessionType = "READING"
                 )
-            )
+
+            if (selectedContent != null) {
+                val readingMinutes =
+                    selectedContent.estimatedMinutes
+                        .coerceAtLeast(1)
+
+                sessions.add(
+                    MicroSessionEntity(
+                        id = "reading_${selectedContent.id}_$todayKey",
+                        type = "READING",
+                        title = "قراءة اختيارية: ${selectedContent.title}",
+                        durationMinutes = readingMinutes,
+                        scheduledAtTimeHint = "11:00",
+                        isRequired = false,
+                        priority = priorityCounter++,
+                        contentId = selectedContent.id,
+                        relatedConceptKey =
+                            selectedContent.relatedConceptKey,
+                        status = "PLANNED",
+                        dateKey = todayKey,
+                        requiredDurationSeconds =
+                            readingMinutes * 60
+                    )
+                )
+            }
         }
 
-        // 4. French review is created only when there is actual learning data
-        // requiring review. Do not force a French session on every day.
-        val unmasteredWords = frenchRepo?.getAllWordsList()?.filter { !it.isMastered } ?: emptyList()
-        val dueFrenchConcepts = spacedRepetition.getDueReviews().filter { it.startsWith("french", ignoreCase = true) }
+        // 4. French review
+        val unmasteredWords =
+            frenchRepo
+                ?.getAllWordsList()
+                ?.filter { !it.isMastered }
+                ?: emptyList()
 
-        if (unmasteredWords.isNotEmpty() && dueFrenchConcepts.isNotEmpty()) {
+        if (unmasteredWords.isNotEmpty()) {
             val word = unmasteredWords.first()
+
             sessions.add(
                 MicroSessionEntity(
                     id = "french_review_${word.id}_$todayKey",
@@ -162,7 +175,7 @@ class DailyRoutineEngine(
                     title = "مراجعة كلمة فرنسية: ${word.frenchWord}",
                     durationMinutes = 4,
                     scheduledAtTimeHint = "16:00",
-                    isRequired = true,
+                    isRequired = false,
                     priority = priorityCounter++,
                     status = "PLANNED",
                     dateKey = todayKey,
@@ -188,7 +201,8 @@ class DailyRoutineEngine(
         }
 
         val greeting = "صباح النور والسرور يا أمي الغالية 🌸. نهارك طيب ومبارك."
-        val wellnessTip = "بدء اليوم بكأس ماء مع حركة خفيفة يساعد على الشعور بالنشاط والانتعاش."
+        val wellnessTip =
+            "اليوم نجموا نركزوا على عادة بسيطة تناسب روتينك، مثل شوية حركة أو الاهتمام بالترطيب إذا كان هذا مناسب ليك."
 
         return DailyCoachSummary(
             greeting = greeting,

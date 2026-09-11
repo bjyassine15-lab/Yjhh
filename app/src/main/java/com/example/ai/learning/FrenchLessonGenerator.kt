@@ -88,8 +88,35 @@ class FrenchLessonGenerator(
 
     suspend fun generateOrPickNextLesson(): GeneratedFrenchLesson {
         val existingWords = frenchRepo.getAllWordsList().map { it.frenchWord.lowercase().trim() }
-        val candidate = curatedLessonPool.firstOrNull { it.word.lowercase().trim() !in existingWords }
-            ?: curatedLessonPool.first()
+        val candidate =
+            curatedLessonPool.firstOrNull {
+                it.word.lowercase().trim() !in existingWords
+            }
+
+        if (candidate == null) {
+            return frenchRepo.getAllWordsList()
+                .firstOrNull { !it.isMastered }
+                ?.let { existing ->
+                    GeneratedFrenchLesson(
+                        word = existing.frenchWord,
+                        arabicPhonetics = existing.arabicPhonetics,
+                        arabicMeaning = existing.arabicMeaning,
+                        tunisianEverydayContext =
+                            existing.tunisianEverydayContext,
+                        medicalContext =
+                            existing.medicalContext,
+                        exampleDailySentence =
+                            existing.exampleDailySentence,
+                        exampleMedicalSentence =
+                            existing.exampleMedicalSentence,
+                        interactivePrompt =
+                            existing.interactivePrompt
+                    )
+                }
+                ?: throw IllegalStateException(
+                    "لا توجد كلمة فرنسية جديدة أو كلمة قيد المراجعة."
+                )
+        }
 
         // If it's a new word not yet in DB, persist it
         if (candidate.word.lowercase().trim() !in existingWords) {

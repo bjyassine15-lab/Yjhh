@@ -152,7 +152,18 @@ fun RafiqahNavGraph(
         composable(RafiqahDestinations.READING) {
             val dynamicReadingItem by viewModel.selectedReadingContent.collectAsState()
             val contentList by viewModel.allContentItems.collectAsState()
-            val activeItem = dynamicReadingItem ?: contentList.firstOrNull()
+            val activeItem =
+                dynamicReadingItem
+                    ?: contentList
+                        .filter {
+                            it.category == "SCIENCE" ||
+                            it.category == "HEALTH_EDUCATION" ||
+                            it.category == "CULTURE" ||
+                            it.category == "STORY"
+                        }
+                        .minByOrNull {
+                            it.estimatedMinutes
+                        }
 
             com.example.ui.reading.ReadingScreen(
                 contentItem = activeItem,

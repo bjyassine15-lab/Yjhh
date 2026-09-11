@@ -298,13 +298,13 @@ object AIToolRegistry {
         ),
         ToolDefinition(
             name = "start_reading_session",
-            description = "بدء جلسة قراءة يومية مطلوبة أو اختيارية بمؤقت 10 دقائق ومحتوى تعليمي",
+            description = "بدء جلسة قراءة بمحتوى تعليمي ومدة محددة من المستخدم أو من الجلسة الحالية",
             accessLevel = ToolAccessLevel.SAFE_WRITE,
             parametersSchema = JSONObject().apply {
                 put("type", "OBJECT")
                 put("properties", JSONObject().apply {
                     put("contentId", buildParam("STRING", "معرف المحتوى، مثلا: content_heart_health, content_cell_membrane"))
-                    put("durationMinutes", buildParam("INTEGER", "المدة المطلوبة بالدقائق (افتراضي 10)"))
+                    put("durationMinutes", buildParam("INTEGER", "المدة المطلوبة بالدقائق. يجب ذكرها أو توفيرها من جلسة القراءة الحالية."))
                 })
             }
         ),
@@ -1063,13 +1063,22 @@ open class ToolExecutor(
                     if (notes.isNotBlank()) noteParts.add(notes)
 
                     val summaryNote = if (noteParts.isNotEmpty()) noteParts.joinToString(" - ") else "متابعة صحية روتينية"
-                    healthRepo?.addObservation(summaryNote, "CHECKIN")
-                    memoryRepo.saveMemoryWithDeduplication(summaryNote, MemoryCategory.HEALTH, 3, "متابعة صحية يومية")
+                    val observationId =
+                        healthRepo?.addObservation(summaryNote, "CHECKIN")
+
+                    if (observationId == null || observationId <= 0L) {
+                        return "تعذر حفظ المتابعة الصحية."
+                    }
 
                     if (water != null && water > 0) {
                         val hp = healthRepo?.getHealthProfile()
                         if (hp != null) {
-                            healthRepo.saveHealthProfile(hp.copy(currentWaterGlasses = hp.currentWaterGlasses + water))
+                            healthRepo.saveHealthProfile(
+                                hp.copy(
+                                    currentWaterGlasses =
+                                        hp.currentWaterGlasses + water
+                                )
+                            )
                         }
                     }
 
